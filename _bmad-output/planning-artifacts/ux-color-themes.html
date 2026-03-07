@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UltraClipboard — Color Theme Explorer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #111;
+      color: #eee;
+      padding: 2rem;
+    }
+    h1 {
+      text-align: center;
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 0.4rem;
+      letter-spacing: -0.01em;
+    }
+    .subtitle {
+      text-align: center;
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 2.5rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .theme-card {
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #222;
+    }
+    .theme-label {
+      padding: 0.6rem 1rem;
+      background: #1a1a1a;
+      border-bottom: 1px solid #222;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #666;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .theme-label span.mood {
+      font-weight: 400;
+      font-size: 0.7rem;
+      text-transform: none;
+      letter-spacing: 0;
+      color: #555;
+    }
+
+    /* ─── THEME WRAPPER ─── */
+    .app-frame {
+      padding: 1.25rem;
+    }
+
+    /* ─── WINDOW CHROME ─── */
+    .window {
+      border-radius: 8px;
+      overflow: hidden;
+      border-width: 1px;
+      border-style: solid;
+    }
+    .titlebar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-bottom-width: 1px;
+      border-bottom-style: solid;
+    }
+    .dot { width: 11px; height: 11px; border-radius: 50%; }
+
+    /* ─── PLAYGROUND LAYOUT ─── */
+    .pg-body { padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
+    .pg-label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 0.25rem;
+    }
+    .pg-input {
+      width: 100%;
+      border-radius: 6px;
+      padding: 0.5rem 0.65rem;
+      font-size: 0.8rem;
+      border-width: 1px;
+      border-style: solid;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      resize: none;
+    }
+    .pg-select {
+      width: 100%;
+      border-radius: 6px;
+      padding: 0.45rem 0.65rem;
+      font-size: 0.8rem;
+      border-width: 1px;
+      border-style: solid;
+      appearance: none;
+      cursor: pointer;
+    }
+    .pg-run-btn {
+      width: 100%;
+      border-radius: 6px;
+      padding: 0.45rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      letter-spacing: 0.01em;
+    }
+
+    /* ─── STEP DEBUGGER ─── */
+    .steps { display: flex; flex-direction: column; gap: 0.35rem; }
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-radius: 5px;
+      padding: 0.35rem 0.5rem;
+      border-width: 1px;
+      border-style: solid;
+    }
+    .step-name {
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      min-width: 64px;
+    }
+    .step-arrow { font-size: 0.65rem; opacity: 0.4; }
+    .step-value { font-size: 0.72rem; font-family: 'SF Mono', 'Fira Code', monospace; }
+    .step-badge {
+      margin-left: auto;
+      font-size: 0.6rem;
+      padding: 0.1rem 0.4rem;
+      border-radius: 99px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
+    /* ─── TRAY STATES ─── */
+    .tray-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      padding: 0.65rem 1rem;
+      border-top-width: 1px;
+      border-top-style: solid;
+    }
+    .tray-label-text { font-size: 0.65rem; color: #666; flex: 1; }
+    .tray-icon {
+      width: 22px; height: 22px;
+      border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .tray-state-label {
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      width: 52px;
+      text-align: center;
+    }
+
+    /* ─── COMPONENTS ROW ─── */
+    .comp-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 0.65rem 1rem;
+      border-top-width: 1px;
+      border-top-style: solid;
+    }
+    .chip {
+      font-size: 0.62rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.2rem 0.55rem;
+      border-radius: 99px;
+    }
+    .kbd {
+      font-size: 0.62rem;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      border-width: 1px;
+      border-style: solid;
+    }
+
+    /* ══════════════════════════════════════
+       THEME 1 — CARBON
+       Dark warm neutral, blue accent
+    ══════════════════════════════════════ */
+    .t1 .window { background: #171717; border-color: #2a2a2a; }
+    .t1 .titlebar { background: #1c1c1c; border-color: #2a2a2a; }
+    .t1 .dot:nth-child(1) { background: #ff5f57; }
+    .t1 .dot:nth-child(2) { background: #febc2e; }
+    .t1 .dot:nth-child(3) { background: #28c840; }
+    .t1 .pg-label { color: #666; }
+    .t1 .pg-input { background: #111; border-color: #2d2d2d; color: #e0e0e0; }
+    .t1 .pg-input::placeholder { color: #444; }
+    .t1 .pg-select { background: #1c1c1c; border-color: #2d2d2d; color: #c8c8c8; }
+    .t1 .pg-run-btn { background: #2563eb; color: #fff; }
+    .t1 .step { background: #1c1c1c; border-color: #282828; }
+    .t1 .step-name { color: #555; }
+    .t1 .step-value { color: #b0c4d8; }
+    .t1 .step-badge.ok { background: #14291a; color: #4ade80; }
+    .t1 .step-badge.proc { background: #1a2238; color: #60a5fa; }
+    .t1 .tray-row { border-color: #222; }
+    .t1 .tray-icon.idle { background: #1e2a3a; color: #60a5fa; }
+    .t1 .tray-icon.proc { background: #1a2a1a; color: #4ade80; }
+    .t1 .tray-icon.err  { background: #2a1a1a; color: #f87171; }
+    .t1 .tray-state-label { color: #555; }
+    .t1 .comp-row { border-color: #222; }
+    .t1 .chip.primary { background: #1a2a4a; color: #60a5fa; }
+    .t1 .chip.success { background: #14291a; color: #4ade80; }
+    .t1 .chip.error   { background: #2a1414; color: #f87171; }
+    .t1 .kbd { background: #1c1c1c; border-color: #2d2d2d; color: #888; }
+    .t1 .titlebar-title { font-size: 0.72rem; font-weight: 600; color: #555; margin-left: auto; margin-right: auto; padding-right: 40px; }
+
+    /* ══════════════════════════════════════
+       THEME 2 — SLATE
+       Dark cool, indigo accent
+    ══════════════════════════════════════ */
+    .t2 .window { background: #0f172a; border-color: #1e293b; }
+    .t2 .titlebar { background: #1e293b; border-color: #2d3f55; }
+    .t2 .dot:nth-child(1) { background: #ff5f57; }
+    .t2 .dot:nth-child(2) { background: #febc2e; }
+    .t2 .dot:nth-child(3) { background: #28c840; }
+    .t2 .pg-label { color: #475569; }
+    .t2 .pg-input { background: #0a0f1e; border-color: #1e2d40; color: #cbd5e1; }
+    .t2 .pg-input::placeholder { color: #334155; }
+    .t2 .pg-select { background: #1a2438; border-color: #2d3f55; color: #94a3b8; }
+    .t2 .pg-run-btn { background: #6366f1; color: #fff; }
+    .t2 .step { background: #1a2438; border-color: #263450; }
+    .t2 .step-name { color: #475569; }
+    .t2 .step-value { color: #93c5fd; }
+    .t2 .step-badge.ok { background: #0f2420; color: #34d399; }
+    .t2 .step-badge.proc { background: #1e1b40; color: #a5b4fc; }
+    .t2 .tray-row { border-color: #1e293b; }
+    .t2 .tray-icon.idle { background: #1e1b40; color: #a5b4fc; }
+    .t2 .tray-icon.proc { background: #0f2420; color: #34d399; }
+    .t2 .tray-icon.err  { background: #2a1020; color: #fb7185; }
+    .t2 .tray-state-label { color: #475569; }
+    .t2 .comp-row { border-color: #1e293b; }
+    .t2 .chip.primary { background: #1e1b40; color: #a5b4fc; }
+    .t2 .chip.success { background: #0f2420; color: #34d399; }
+    .t2 .chip.error   { background: #2a1020; color: #fb7185; }
+    .t2 .kbd { background: #1a2438; border-color: #2d3f55; color: #64748b; }
+    .t2 .titlebar-title { font-size: 0.72rem; font-weight: 600; color: #475569; margin-left: auto; margin-right: auto; padding-right: 40px; }
+
+    /* ══════════════════════════════════════
+       THEME 3 — ZINC LIGHT
+       Clean light, neutral, blue accent
+    ══════════════════════════════════════ */
+    .t3 .window { background: #fafafa; border-color: #e4e4e7; }
+    .t3 .titlebar { background: #f4f4f5; border-color: #e4e4e7; }
+    .t3 .dot:nth-child(1) { background: #ff5f57; }
+    .t3 .dot:nth-child(2) { background: #febc2e; }
+    .t3 .dot:nth-child(3) { background: #28c840; }
+    .t3 .pg-label { color: #a1a1aa; }
+    .t3 .pg-input { background: #fff; border-color: #d4d4d8; color: #18181b; }
+    .t3 .pg-input::placeholder { color: #d4d4d8; }
+    .t3 .pg-select { background: #f4f4f5; border-color: #d4d4d8; color: #52525b; }
+    .t3 .pg-run-btn { background: #2563eb; color: #fff; }
+    .t3 .step { background: #f4f4f5; border-color: #e4e4e7; }
+    .t3 .step-name { color: #a1a1aa; }
+    .t3 .step-value { color: #3b82f6; }
+    .t3 .step-badge.ok { background: #dcfce7; color: #16a34a; }
+    .t3 .step-badge.proc { background: #eff6ff; color: #2563eb; }
+    .t3 .tray-row { border-color: #e4e4e7; }
+    .t3 .tray-icon.idle { background: #eff6ff; color: #2563eb; }
+    .t3 .tray-icon.proc { background: #dcfce7; color: #16a34a; }
+    .t3 .tray-icon.err  { background: #fef2f2; color: #dc2626; }
+    .t3 .tray-state-label { color: #a1a1aa; }
+    .t3 .comp-row { border-color: #e4e4e7; }
+    .t3 .chip.primary { background: #eff6ff; color: #2563eb; }
+    .t3 .chip.success { background: #dcfce7; color: #16a34a; }
+    .t3 .chip.error   { background: #fef2f2; color: #dc2626; }
+    .t3 .kbd { background: #f4f4f5; border-color: #d4d4d8; color: #a1a1aa; }
+    .t3 .titlebar-title { font-size: 0.72rem; font-weight: 600; color: #a1a1aa; margin-left: auto; margin-right: auto; padding-right: 40px; }
+
+    /* ══════════════════════════════════════
+       THEME 4 — TEAL NIGHT
+       Dark, teal accent, distinctive
+    ══════════════════════════════════════ */
+    .t4 .window { background: #0d1717; border-color: #172525; }
+    .t4 .titlebar { background: #111f1f; border-color: #1c2e2e; }
+    .t4 .dot:nth-child(1) { background: #ff5f57; }
+    .t4 .dot:nth-child(2) { background: #febc2e; }
+    .t4 .dot:nth-child(3) { background: #28c840; }
+    .t4 .pg-label { color: #3d6060; }
+    .t4 .pg-input { background: #0a1212; border-color: #172525; color: #c8e0e0; }
+    .t4 .pg-input::placeholder { color: #1f3535; }
+    .t4 .pg-select { background: #111f1f; border-color: #1c2e2e; color: #6aacac; }
+    .t4 .pg-run-btn { background: #0d9488; color: #fff; }
+    .t4 .step { background: #111f1f; border-color: #1a2e2e; }
+    .t4 .step-name { color: #3d6060; }
+    .t4 .step-value { color: #5eead4; }
+    .t4 .step-badge.ok { background: #0a2020; color: #2dd4bf; }
+    .t4 .step-badge.proc { background: #0a1a2a; color: #7dd3fc; }
+    .t4 .tray-row { border-color: #172525; }
+    .t4 .tray-icon.idle { background: #0f2828; color: #2dd4bf; }
+    .t4 .tray-icon.proc { background: #0a1a2a; color: #7dd3fc; }
+    .t4 .tray-icon.err  { background: #2a1010; color: #f87171; }
+    .t4 .tray-state-label { color: #3d6060; }
+    .t4 .comp-row { border-color: #172525; }
+    .t4 .chip.primary { background: #0f2828; color: #2dd4bf; }
+    .t4 .chip.success { background: #0a2020; color: #34d399; }
+    .t4 .chip.error   { background: #2a1010; color: #f87171; }
+    .t4 .kbd { background: #111f1f; border-color: #1c2e2e; color: #3d6060; }
+    .t4 .titlebar-title { font-size: 0.72rem; font-weight: 600; color: #3d6060; margin-left: auto; margin-right: auto; padding-right: 40px; }
+  </style>
+</head>
+<body>
+  <h1>UltraClipboard — Color Theme Explorer</h1>
+  <p class="subtitle">4 directions visuelles basées sur l'objectif "calme confiance" · Choisissez-en une ou combinez des éléments</p>
+
+  <div class="grid">
+
+    <!-- ═══ THEME 1: CARBON ═══ -->
+    <div class="theme-card t1">
+      <div class="theme-label">
+        Theme 1 — Carbon
+        <span class="mood">Warm dark · Blue accent · Intemporel</span>
+      </div>
+      <div class="app-frame">
+        <div class="window">
+          <div class="titlebar">
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            <span class="titlebar-title">UltraClipboard — Playground</span>
+          </div>
+          <div class="pg-body">
+            <div>
+              <div class="pg-label">Input</div>
+              <textarea class="pg-input" rows="2" placeholder="https://youtube.com/watch?v=dQw4w9WgXcQ" readonly></textarea>
+            </div>
+            <div>
+              <div class="pg-label">Pipeline</div>
+              <select class="pg-select"><option>fetch-youtube-title</option></select>
+            </div>
+            <button class="pg-run-btn">▶ Run pipeline</button>
+            <div>
+              <div class="pg-label">Step Debugger</div>
+              <div class="steps">
+                <div class="step">
+                  <span class="step-name">input</span>
+                  <span class="step-arrow">→</span>
+                  <span class="step-value">https://youtube.com/watch?v=dQw...</span>
+                  <span class="step-badge proc">raw</span>
+                </div>
+                <div class="step">
+                  <span class="step-name">fetch-title</span>
+                  <span class="step-arrow">→</span>
+                  <span class="step-value">[Never Gonna Give You Up](https://...)</span>
+                  <span class="step-badge ok">done</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="tray-row">
+            <span class="tray-label-text">System tray states :</span>
+            <span class="tray-icon idle">◈</span>
+            <span class="tray-state-label" style="color:#60a5fa">idle</span>
+            <span class="tray-icon proc">◉</span>
+            <span class="tray-state-label" style="color:#4ade80">running</span>
+            <span class="tray-icon err">◈</span>
+            <span class="tray-state-label" style="color:#f87171">error</span>
+          </div>
+          <div class="comp-row">
+            <span class="chip primary">pipeline</span>
+            <span class="chip success">ok</span>
+            <span class="chip error">error</span>
+            <span class="kbd">Ctrl+V+V</span>
+            <span class="kbd">Ctrl+C</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ THEME 2: SLATE ═══ -->
+    <div class="theme-card t2">
+      <div class="theme-label">
+        Theme 2 — Slate
+        <span class="mood">Cool dark · Indigo accent · Focalisé</span>
+      </div>
+      <div class="app-frame">
+        <div class="window">
+          <div class="titlebar">
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            <span class="titlebar-title">UltraClipboard — Playground</span>
+          </div>
+          <div class="pg-body">
+            <div>
+              <div class="pg-label">Input</div>
+              <textarea class="pg-input" rows="2" placeholder="https://youtube.com/watch?v=dQw4w9WgXcQ" readonly></textarea>
+            </div>
+            <div>
+              <div class="pg-label">Pipeline</div>
+              <select class="pg-select"><option>fetch-youtube-title</option></select>
+            </div>
+            <button class="pg-run-btn">▶ Run pipeline</button>
+            <div>
+              <div class="pg-label">Step Debugger</div>
+              <div class="steps">
+                <div class="step">
+                  <span class="step-name">input</span>
+                  <span class="step-arrow">→</span>
+                  <span class="step-value">https://youtube.com/watch?v=dQw...</span>
+                  <span class="step-badge proc">raw</span>
+                </div>
+                <div class="step">
+                  <span class="step-name">fetch-title</span>
+                  <span class="step-arrow">→</span>
+                  <span class="step-value">[Never Gonna Give You Up](https://...)</span>
+                  <span class="step-badge ok">done</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="tray-row">
+            <span class="tray-label-text">System tray states :</span>
+            <span class="tray-icon idle">◈</span>
+            <span class="tray-state-label" style="color:#a5b4fc">idle</span>
+            <span class="tray-icon proc">◉</span>
+            <span class="tray-state-label" style="color:#34d399">running</span>
+            <span class="tray-icon err">◈</span>
+            <span class="tray-state-label" style="color:#fb7185">error</span>
+          </div>
+          <div class="comp-row">
+            <span class="chip primary">pipeline</span>
+            <span class="chip success">ok</span>
+            <span class="chip error">error</span>
+            <span class="kbd">Ctrl+V+V</span>
+            <span class="kbd">Ctrl+C</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ THEME 3: ZINC LIGHT ═══ -->
+    <div class="theme-card t3">
+      <div class="theme-label">
+        Theme 3 — Zinc Light
+        <span class="mood">Light · Neutral · Épuré</span>
+      </div>
+      <div class="app-frame">
+        <div class="window">
+          <div class="titlebar">
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            <span class="titlebar-title">UltraClipboard — Playground</span>
+          </div>
+          <div class="pg-body">
+            <div>
+              <div class="pg-label">Input</div>
+              <textarea class="pg-input" rows="2" placeholder="https://youtube.com/watch?v=dQw4w9WgXcQ" readonly></textarea>
+            </div>
+            <div>
+              <div class="pg-label">Pipeline</div>
+              <select class="pg-select"><option>fetch-youtube-title</option></select>
+            </div>
+            <button class="pg-run-btn">▶ Run pipeline</button>
+            <div>
+              <div class="pg-label">Step Debugger</div>
+              <div class="steps">
+                <div class="step">
+                  <span class="step-name">input</span>
+                  <span class="step-arrow">→</span>
+                  <span class="step-value">https://youtube.com/watch?v=dQw...</span>
+                  <span class="step-badge proc">raw</span>
+                </div>
+                <div class="step">
+                  <span class="step-name">fetch-title</span>
+                  <span class="step-arrow">→</span>
+                  <span class="step-value">[Never Gonna Give You Up](https://...)</span>
+                  <span class="step-badge ok">done</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="tray-row">
+            <span class="tray-label-text">System tray states :</span>
+            <span class="tray-icon idle">◈</span>
+            <span class="tray-state-label" style="color:#2563eb">idle</span>
+            <span class="tray-icon proc">◉</span>
+            <span class="tray-state-label" style="color:#16a34a">running</span>
+            <span class="tray-icon err">◈</span>
+            <span class="tray-state-label" style="color:#dc2626">error</span>
+          </div>
+          <div class="comp-row">
+            <span class="chip primary">pipeline</span>
+            <span class="chip success">ok</span>
+            <span class="chip error">error</span>
+            <span class="kbd">Ctrl+V+V</span>
+            <span class="kbd">Ctrl+C</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ THEME 4: TEAL NIGHT ═══ -->
+    <div class="theme-card t4">
+      <div class="theme-label">
+        Theme 4 — Teal Night
+        <span class="mood">Dark · Teal accent · Distinctif</span>
+      </div>
+      <div class="app-frame">
+        <div class="window">
+          <div class="titlebar">
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            <span class="titlebar-title">UltraClipboard — Playground</span>
+          </div>
+          <div class="pg-body">
+            <div>
+              <div class="pg-label">Input</div>
+              <textarea class="pg-input" rows="2" placeholder="https://youtube.com/watch?v=dQw4w9WgXcQ" readonly></textarea>
+            </div>
+            <div>
+              <div class="pg-label">Pipeline</div>
+              <select class="pg-select"><option>fetch-youtube-title</option></select>
+            </div>
+            <button class="pg-run-btn">▶ Run pipeline</button>
+            <div>
+              <div class="pg-label">Step Debugger</div>
+              <div class="steps">
+                <div class="step">
+                  <span class="step-name">input</span>
+                  <span class="step-arrow">→</span>
+                  <span class="step-value">https://youtube.com/watch?v=dQw...</span>
+                  <span class="step-badge proc">raw</span>
+                </div>
+                <div class="step">
+                  <span class="step-name">fetch-title</span>
+                  <span class="step-arrow">→</span>
+                  <span class="step-value">[Never Gonna Give You Up](https://...)</span>
+                  <span class="step-badge ok">done</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="tray-row">
+            <span class="tray-label-text">System tray states :</span>
+            <span class="tray-icon idle">◈</span>
+            <span class="tray-state-label" style="color:#2dd4bf">idle</span>
+            <span class="tray-icon proc">◉</span>
+            <span class="tray-state-label" style="color:#7dd3fc">running</span>
+            <span class="tray-icon err">◈</span>
+            <span class="tray-state-label" style="color:#f87171">error</span>
+          </div>
+          <div class="comp-row">
+            <span class="chip primary">pipeline</span>
+            <span class="chip success">ok</span>
+            <span class="chip error">error</span>
+            <span class="kbd">Ctrl+V+V</span>
+            <span class="kbd">Ctrl+C</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <p style="text-align:center; margin-top: 2rem; font-size: 0.72rem; color: #444;">
+    UltraClipboard UX Color Themes · 2026-03-07 · Ouvrez ce fichier dans un navigateur
+  </p>
+</body>
+</html>
