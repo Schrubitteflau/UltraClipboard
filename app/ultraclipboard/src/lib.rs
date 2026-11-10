@@ -18,7 +18,7 @@ use zbus::fdo::{RequestNameFlags, RequestNameReply};
 use zbus::{Connection, interface, object_server::SignalEmitter};
 
 pub use app::{Started, start_app};
-pub use config::{ConfigFollower, config_path, follow_config};
+pub use config::{ConfigFollower, config_path, follow_config, start_engine};
 pub use notifications::{NotificationSender, PendingNotifications, queue_notifications};
 
 pub const BUS_NAME: &str = "org.ultraclipboard.UltraClipboard";

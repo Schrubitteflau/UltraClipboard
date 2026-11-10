@@ -6,24 +6,26 @@
 
 use std::process::ExitCode;
 
-use engine::Engine;
+use engine::{ConfigState, Engine};
 use tauri::Wry;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{App, AppHandle, Manager, WindowEvent};
-use ultraclipboard::{BUS_NAME, config_path, start_app};
+use tauri::{App, AppHandle, Emitter, Manager, State, WindowEvent};
+use ultraclipboard::{BUS_NAME, start_app};
 
 const MAIN_WINDOW: &str = "main";
 const MENU_OPEN: &str = "open";
 const MENU_NOTIFICATIONS: &str = "notifications";
 const MENU_QUIT: &str = "quit";
+/// Événement poussé à la fenêtre à chaque chargement de config ; porte un [`ConfigState`].
+const CONFIG_CHANGED: &str = "config-changed";
 
 fn main() -> ExitCode {
     // Un seul runtime, partagé par le service D-Bus, le moteur et Tauri.
     let runtime = tokio::runtime::Runtime::new().expect("runtime tokio");
     let connect = || zbus::connection::Builder::session().build();
     // Gardée jusqu'à la fin : avec elle, l'envoi des notifications et le suivi de la config.
-    let started = match runtime.block_on(start_app(config_path(), connect)) {
+    let started = match runtime.block_on(start_app(ultraclipboard::config_path(), connect)) {
         Ok(started) => started,
         Err(err) => {
             eprintln!("ultraclipboard: {err}");
@@ -37,8 +39,10 @@ fn main() -> ExitCode {
         // La connexion vit aussi longtemps que l'appli : le service avec elle.
         .manage(started.conn.clone())
         .manage(started.engine.clone())
+        .invoke_handler(tauri::generate_handler![config_state, config_path])
         .setup(|app| {
             add_tray(app)?;
+            push_config_changes(app);
             Ok(())
         })
         // Fermer la fenêtre la cache ; seul « Quitter » arrête l'appli.
@@ -51,6 +55,30 @@ fn main() -> ExitCode {
         .run(tauri::generate_context!())
         .expect("démarrage de Tauri");
     ExitCode::SUCCESS
+}
+
+/// Ce qui est chargé (vue « Règles »).
+#[tauri::command]
+fn config_state(engine: State<'_, Engine>) -> ConfigState {
+    engine.config_state()
+}
+
+/// Chemin du fichier de config ; `None` sans XDG_CONFIG_HOME ni HOME.
+#[tauri::command]
+fn config_path() -> Option<String> {
+    ultraclipboard::config_path().map(|path| path.display().to_string())
+}
+
+/// Pousse [`CONFIG_CHANGED`] à la fenêtre à chaque chargement de config.
+fn push_config_changes(app: &App) {
+    let engine = app.state::<Engine>().inner().clone();
+    let mut changes = engine.config_changes();
+    let app = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        while changes.changed().await.is_ok() {
+            let _ = app.emit(CONFIG_CHANGED, engine.config_state());
+        }
+    });
 }
 
 /// Icône AppIndicator. Sous Linux le clic sur l'icône n'émet rien : tout passe par le menu.
