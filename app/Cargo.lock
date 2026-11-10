@@ -867,6 +867,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde-saphyr",
+ "serde_json",
  "tokio",
 ]
 
