@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 
 pub use config::{Config, ConfigError, Notifications, Rule, SAMPLE_CONFIG};
 pub use pipeline::{Failure, Pipeline};
-pub use transformations::{StepError, StepFuture, Transformation};
+pub use transformations::{Endpoints, StepError, StepFuture, Transformation};
 
 use state::{Registration, State};
 
