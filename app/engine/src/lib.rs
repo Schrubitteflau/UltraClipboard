@@ -55,6 +55,9 @@ pub enum Skip {
     Unchanged,
     /// Le Pipeline rend un texte vide : on ne vide jamais le presse-papier.
     EmptyResult,
+    /// UltraClipboard est en pause ([`Engine::set_paused`]) : la copie reste
+    /// telle quelle.
+    Paused,
 }
 
 /// Ce qui est chargé, pour l'afficher : la config active et le refus du dernier
@@ -109,6 +112,8 @@ pub struct Engine {
     /// Hors de la config : un rechargement ne le touche pas.
     history: Arc<Mutex<History>>,
     notifier: Arc<Notifier>,
+    /// Vrai en pause ; signalé à chaque bascule.
+    paused: Arc<watch::Sender<bool>>,
 }
 
 /// Config active et refus du dernier chargement, s'il a échoué.
@@ -150,6 +155,7 @@ impl Engine {
             state: Arc::default(),
             history: Arc::default(),
             notifier: Arc::default(),
+            paused: Arc::new(watch::Sender::new(false)),
         }
     }
 
@@ -258,6 +264,41 @@ impl Engine {
         self.notifier.muted()
     }
 
+    /// Met en pause (ou reprend) jusqu'au redémarrage : en pause, aucune copie
+    /// n'est transformée ([`Skip::Paused`]).
+    ///
+    /// Mettre en pause arrête le traitement en cours, s'il y en a un (copie ou
+    /// réapplication) : son issue est [`Outcome::Cancelled`], rien n'est écrit,
+    /// il entre dans l'historique comme annulé, sans notification. Mettre en
+    /// pause ne change rien à ce qui est restaurable. Une copie faite en pause reste une copie : elle
+    /// arrête le traitement en cours, et l'Original d'avant elle n'est plus
+    /// restauré (la dernière copie gagne). Restaurer l'Original et réappliquer
+    /// ([`Engine::reapply`]) marchent en pause.
+    pub fn set_paused(&self, paused: bool) {
+        // Sous le verrou de l'état : une copie enregistrée avant la pause est
+        // arrêtée, une copie enregistrée après voit la pause.
+        let mut state = self.state.lock().unwrap();
+        let changed = self.paused.send_if_modified(|current| {
+            let changed = *current != paused;
+            *current = paused;
+            changed
+        });
+        if changed && paused {
+            state.cancel();
+        }
+    }
+
+    /// Vrai en pause.
+    pub fn paused(&self) -> bool {
+        *self.paused.borrow()
+    }
+
+    /// Reçoit un signal à chaque mise en pause ou reprise qui suit cet appel :
+    /// de quoi relire [`Engine::paused`].
+    pub fn pause_changes(&self) -> watch::Receiver<bool> {
+        self.paused.subscribe()
+    }
+
     /// Signale une copie sans texte (image, fichiers…).
     ///
     /// Rien n'est écrit, mais c'est une copie plus récente : le traitement
@@ -278,7 +319,33 @@ impl Engine {
     /// coupée) et son issue est [`Outcome::Cancelled`].
     pub fn on_copy(&self, text: &str) -> impl Future<Output = Outcome> + Send + use<> {
         // Toute copie (même sans Règle) est enregistrée : elle annule celle en cours.
-        let registration = self.state.lock().unwrap().register(text);
+        let (registration, paused) = {
+            let mut state = self.state.lock().unwrap();
+            (state.register(text), self.paused())
+        };
+        self.process(text, registration, paused)
+    }
+
+    /// Réapplique les Règles à `text` (le contenu actuel du presse-papier) :
+    /// même issue qu'une copie de ce texte ([`Engine::on_copy`] : annule la
+    /// copie en cours, entre dans l'historique, notifie ; son texte devient
+    /// l'Original restaurable si elle applique une Transformation), mais c'est
+    /// une action explicite : elle marche en pause et transforme même un texte
+    /// écrit par UltraClipboard (pas d'anti-boucle). Ce n'est pas une copie :
+    /// sans Transformation appliquée, l'Original d'avant reste restaurable, et
+    /// les échos de nos écritures précédentes restent attendus.
+    pub fn reapply(&self, text: &str) -> impl Future<Output = Outcome> + Send + use<> {
+        let registration = self.state.lock().unwrap().register_explicit();
+        self.process(text, registration, false)
+    }
+
+    /// Traitement d'une copie enregistrée ; `paused` : ne rien transformer.
+    fn process(
+        &self,
+        text: &str,
+        registration: Registration,
+        paused: bool,
+    ) -> impl Future<Output = Outcome> + Send + use<> {
         let at = SystemTime::now();
         let matched = self
             .config
@@ -286,6 +353,7 @@ impl Engine {
             .unwrap()
             .active
             .rule_for(text)
+            .filter(|_| !paused)
             .map(|rule| {
                 let pipeline = rule.run();
                 (
@@ -304,6 +372,9 @@ impl Engine {
                 Registration::OwnWrite => return Outcome::Nothing(Skip::OwnWrite),
                 Registration::Accepted(ticket, superseded) => (ticket, superseded),
             };
+            if paused {
+                return Outcome::Nothing(Skip::Paused);
+            }
             let Some((rule, name, pipeline)) = matched else {
                 return Outcome::Nothing(Skip::NoRule);
             };
@@ -364,8 +435,10 @@ impl Engine {
     /// La dernière copie gagne : l'Original ne remplace jamais une copie plus
     /// récente que la Transformation, et rien n'est écrit. Une copie en cours
     /// de traitement (qu'il y ait un Original ou non) s'arrête, son issue est
-    /// [`Outcome::Cancelled`], et elle reste telle que copiée. Ni historique ni
-    /// notification : seule une copie y entre.
+    /// [`Outcome::Cancelled`], et elle reste telle que copiée. Une
+    /// réapplication en cours s'arrête aussi, mais ce n'est pas une copie :
+    /// l'Original d'avant elle est restauré. Ni historique ni notification :
+    /// seule une copie y entre.
     pub fn restore_original(&self) -> Option<String> {
         self.state.lock().unwrap().restore()
     }

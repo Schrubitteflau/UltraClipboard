@@ -11,10 +11,12 @@ use tauri::Wry;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Emitter, Manager, State, WindowEvent};
+use tokio::sync::watch;
 use ultraclipboard::{BUS_NAME, start_app};
 
 const MAIN_WINDOW: &str = "main";
 const MENU_OPEN: &str = "open";
+const MENU_PAUSE: &str = "pause";
 const MENU_NOTIFICATIONS: &str = "notifications";
 const MENU_QUIT: &str = "quit";
 /// Événement poussé à la fenêtre à chaque chargement de config ; porte un [`ConfigState`].
@@ -104,7 +106,13 @@ fn push_config_changes(app: &App) {
 
 /// Icône AppIndicator. Sous Linux le clic sur l'icône n'émet rien : tout passe par le menu.
 fn add_tray(app: &App) -> tauri::Result<()> {
-    let muted = app.state::<Engine>().notifications_muted();
+    let engine = app.state::<Engine>().inner().clone();
+    // Abonné avant de lire l'état : aucune bascule ne passe entre les deux.
+    let mut pause_changes = engine.pause_changes();
+    let paused = *pause_changes.borrow_and_update();
+    let pause = MenuItem::with_id(app, MENU_PAUSE, pause_label(paused), true, None::<&str>)?;
+    follow_pause(pause_changes, &pause);
+    let muted = engine.notifications_muted();
     let notifications = MenuItem::with_id(
         app,
         MENU_NOTIFICATIONS,
@@ -116,6 +124,7 @@ fn add_tray(app: &App) -> tauri::Result<()> {
         app,
         &[
             &MenuItem::with_id(app, MENU_OPEN, "Ouvrir", true, None::<&str>)?,
+            &pause,
             &notifications,
             &MenuItem::with_id(app, MENU_QUIT, "Quitter", true, None::<&str>)?,
         ],
@@ -125,6 +134,10 @@ fn add_tray(app: &App) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id().as_ref() {
             MENU_OPEN => show_window(app),
+            MENU_PAUSE => {
+                let engine = app.state::<Engine>();
+                engine.set_paused(!engine.paused());
+            }
             MENU_NOTIFICATIONS => toggle_notifications(app, &notifications),
             MENU_QUIT => app.exit(0),
             _ => {}
@@ -134,6 +147,27 @@ fn add_tray(app: &App) -> tauri::Result<()> {
     }
     tray.build(app)?;
     Ok(())
+}
+
+/// Garde le libellé de l'entrée « pause » à jour, que la bascule vienne du
+/// menu ou de `SetPaused` sur le bus.
+fn follow_pause(mut changes: watch::Receiver<bool>, item: &MenuItem<Wry>) {
+    let item = item.clone();
+    tauri::async_runtime::spawn(async move {
+        while changes.changed().await.is_ok() {
+            let paused = *changes.borrow_and_update();
+            let _ = item.set_text(pause_label(paused));
+        }
+    });
+}
+
+/// Libellé de l'entrée de menu : l'action qu'elle fait.
+fn pause_label(paused: bool) -> &'static str {
+    if paused {
+        "Reprendre"
+    } else {
+        "Mettre en pause"
+    }
 }
 
 /// Coupe ou rétablit les notifications jusqu'au redémarrage.
