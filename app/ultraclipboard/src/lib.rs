@@ -57,8 +57,10 @@ impl From<zbus::Error> for ServeError {
 
 /// Expose le moteur sur `conn` et prend le nom du service.
 ///
-/// Rend la main une fois le service en place ; il tourne tant que le moteur
-/// vit (l'émetteur de `Apply` garde `conn` ouverte jusque-là).
+/// Rend la main une fois le service en place ; il tourne jusqu'à la fin du
+/// processus (ou de son runtime tokio), même si l'appelant lâche `conn` :
+/// l'émetteur de `Apply` en garde une copie, et la file qu'il vide reste
+/// ouverte tant que le moteur vit, lui-même tenu par le service de `conn`.
 /// Une seule instance : si le nom est déjà pris, renvoie [`ServeError::AlreadyRunning`]
 /// au lieu d'attendre en file.
 pub async fn serve(conn: &Connection, engine: Engine) -> Result<(), ServeError> {
