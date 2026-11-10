@@ -217,3 +217,24 @@ async fn at_most_four_echoes_are_awaited() {
     // La plus ancienne est oubliée : son texte est traité comme une copie.
     assert_eq!(engine.on_copy("abc!").await, Outcome::Write("abc!!".into()));
 }
+
+#[tokio::test]
+async fn a_result_and_two_restores_all_await_their_echo() {
+    let engine = exclaim();
+    assert_eq!(engine.on_copy("abc").await, Outcome::Write("abc!".into()));
+    // Deux restaurations avant le retour de l'écho du résultat.
+    assert_eq!(engine.restore_original().as_deref(), Some("abc"));
+    assert_eq!(engine.restore_original().as_deref(), Some("abc"));
+    assert_eq!(
+        engine.on_copy("abc!").await,
+        Outcome::Nothing(Skip::OwnWrite)
+    );
+    assert_eq!(
+        engine.on_copy("abc").await,
+        Outcome::Nothing(Skip::OwnWrite)
+    );
+    assert_eq!(
+        engine.on_copy("abc").await,
+        Outcome::Nothing(Skip::OwnWrite)
+    );
+}
