@@ -288,7 +288,9 @@ fn parse_step(
         BuildError::Unknown => error(path, format!("Transformation inconnue « {name} »")),
         BuildError::Params { field, reason } => {
             let mut at = format!("{path}.{name}");
-            if !field.is_empty() {
+            if field.starts_with('[') {
+                at = format!("{at}{field}");
+            } else if !field.is_empty() {
                 at = format!("{at}.{field}");
             }
             error(at, reason)
