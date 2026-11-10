@@ -15,7 +15,8 @@ pub struct Failure {
 /// Suite ordonnée de Transformations.
 ///
 /// Seam de test temporaire, public seulement pour que les tests branchent une
-/// étape lente ; à retirer quand une vraie étape `command` (`sleep`) pourra jouer ce rôle.
+/// étape lente ; à retirer par le ticket #8, une vraie étape `command` (`sleep`)
+/// pouvant désormais jouer ce rôle.
 pub struct Pipeline {
     steps: Vec<Box<dyn Transformation>>,
 }

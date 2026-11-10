@@ -66,7 +66,8 @@ impl Engine {
     /// Moteur qui applique ce Pipeline à toutes les copies.
     ///
     /// Seam de test temporaire : permet aux tests de brancher une étape lente.
-    /// À retirer quand une vraie étape `command` (`sleep`) pourra jouer ce rôle.
+    /// À retirer par le ticket #8 : une vraie étape `command` (`sleep`) peut
+    /// désormais jouer ce rôle.
     pub fn with_pipeline(pipeline: Pipeline) -> Self {
         Self::new(Config::match_all("test", pipeline))
     }
