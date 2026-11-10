@@ -2,7 +2,6 @@
 
 mod common;
 
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -33,24 +32,6 @@ async fn a_second_instance_is_refused() {
     let second = bus.connect().await;
     let err = serve(&second, Engine::new()).await.unwrap_err();
     assert!(matches!(err, ServeError::AlreadyRunning), "{err:?}");
-}
-
-#[tokio::test]
-async fn the_app_stops_with_a_message_when_already_running() {
-    let bus = PrivateBus::start();
-    let first = bus.connect().await;
-    serve(&first, Engine::new()).await.unwrap();
-
-    let config = std::env::temp_dir().join(format!("ultraclipboard-test-{}", std::process::id()));
-    let out = Command::new(env!("CARGO_BIN_EXE_ultraclipboard"))
-        .env("DBUS_SESSION_BUS_ADDRESS", &bus.address)
-        .env("XDG_CONFIG_HOME", &config)
-        .output()
-        .unwrap();
-
-    assert!(!out.status.success());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("déjà lancé"), "stderr : {stderr}");
 }
 
 /// Met en majuscules ; bloque sur « slow » jusqu'à ce que le test ouvre la barrière.

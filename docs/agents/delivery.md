@@ -4,12 +4,15 @@ Read by `/ship` and its subagents.
 
 ## Checks
 
-- Verify, on every ticket and on the integration branch, from `app/`:
-  `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`.
-  Once the window front-end exists (ticket #4), its type check and tests (`bun run check`, `bun run test` or whatever #4 sets up) are added here by that ticket.
+- Verify, on every ticket and on the integration branch:
+  from `app/`: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`;
+  from `app/ui/` (after `bun install`): `bun run check && bun run build`.
+  The front-end has no unit tests yet (window checked by hand); add `bun run test` here when a ticket adds some.
 - Manual check (sandbox): run the app on a private session bus with a throwaway config:
   `XDG_CONFIG_HOME=$(mktemp -d) dbus-run-session -- <command>`; drive it with `gdbus call --session …` / `gdbus monitor --session` inside the same `dbus-run-session`. It ends with the command; it never touches the real session bus nor the real config.
-- Real browser: the window is a Tauri webview. Agents check its pages by serving the front-end dev server (Vite, `bun run dev`) and loading it headless with Playwright's Chromium (already in `~/.cache/ms-playwright`), reading console errors; Tauri commands/events are mocked at that level. The real Tauri window, the tray icon and the GNOME extension are checked by the human.
+  The app is a Tauri process and needs a display; it must never reach the human's. Unsetting `DISPLAY`/`WAYLAND_DISPLAY` is NOT enough: GTK then falls back to `$XDG_RUNTIME_DIR/wayland-0`, the human's compositor. So `GDK_BACKEND=broadway` is REQUIRED. Inside the `dbus-run-session`: `T=$(mktemp -d -p ~/.cache/ship-uc)`, `unset DISPLAY WAYLAND_DISPLAY`, `export XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data XDG_CACHE_HOME=$T/cache` (the webview otherwise writes to the real `~/.local/share/org.ultraclipboard.UltraClipboard/`), start `broadwayd :17 &`, then run the binary with `GDK_BACKEND=broadway BROADWAY_DISPLAY=:17 NO_AT_BRIDGE=1 GIO_USE_VFS=local`. The D-Bus service, the hidden window and the tray icon start; `Copied` → `Apply` works. Portal services get activated on the private bus and die with it. The tray menu cannot be driven there (no StatusNotifier host).
+  A debug binary (`cargo build`) loads the window from Vite's dev URL: without `bun run dev` its window is blank. The real window is checked with `tauri dev` (from `app/desktop/`: `../ui/node_modules/.bin/tauri dev`) or with the release build made by `install.sh`.
+- Real browser: the window is a Tauri webview. Agents check its pages by serving the front-end with Vite (`bun run dev` in `app/ui/`, port 5173) and loading it headless with Playwright's Chromium (`~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell`, driven by a throwaway `playwright-core` script outside the repo), reading console errors. Outside Tauri, in dev mode, `src/main.ts` installs `src/lib/backend/mock.ts` (Tauri's `mockIPC`, events mocked too): give each new command a plausible answer there. The real Tauri window, the tray icon and the GNOME extension are checked by the human.
 
 ## Off-limits
 

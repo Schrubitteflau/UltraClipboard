@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Ce que la fenêtre peut demander à l'appli : commandes et événements.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
