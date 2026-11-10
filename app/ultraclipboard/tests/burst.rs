@@ -29,16 +29,14 @@ async fn burst_last_copy_wins() {
                 .unwrap();
             sender.send(&msg).await.unwrap();
         }
-        let mut last = None;
+        let mut applies = vec![];
         while let Some(a) = ext.next_apply(Duration::from_millis(100)).await {
-            last = Some(a);
+            applies.push(a);
         }
         let want = texts.last().unwrap().to_uppercase();
-        if last.as_deref() != Some(want.as_str()) {
+        if applies.last() != Some(&want) {
             failures += 1;
-            if failures <= 5 {
-                eprintln!("round {round}: last Apply {last:?}, attendu {want}");
-            }
+            eprintln!("round {round}: Apply {applies:?}, attendu en dernier {want}");
         }
     }
     assert_eq!(

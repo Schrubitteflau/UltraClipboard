@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::SystemTime;
 
 use serde::Serialize;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 pub use config::{Config, ConfigError, NamedPipeline, Notifications, Rule, SAMPLE_CONFIG, Step};
 pub use history::{HISTORY_CAP, HistoryEntry, HistoryStatus, TEXT_CAP};
@@ -114,6 +114,9 @@ pub struct Engine {
     notifier: Arc<Notifier>,
     /// Vrai en pause ; signalé à chaque bascule.
     paused: Arc<watch::Sender<bool>>,
+    /// Abonnés aux écritures ([`Engine::writes`]). Toujours verrouillé sous le
+    /// verrou de `state`, jamais l'inverse.
+    writes: Arc<Writes>,
 }
 
 /// Config active et refus du dernier chargement, s'il a échoué.
@@ -156,6 +159,7 @@ impl Engine {
             history: Arc::default(),
             notifier: Arc::default(),
             paused: Arc::new(watch::Sender::new(false)),
+            writes: Arc::default(),
         }
     }
 
@@ -288,6 +292,21 @@ impl Engine {
         }
     }
 
+    /// Textes à écrire dans le presse-papier (résultats et restaurations),
+    /// chacun publié au moment où le moteur décide de l'écrire, sous le verrou
+    /// de son état : l'ordre de réception est l'ordre des décisions, et une
+    /// copie dépassée ne publie rien. Chaque abonné reçoit toutes les écritures
+    /// décidées après l'appel, sans en perdre : chacune est attendue en écho par
+    /// l'anti-boucle, elle doit donc partir. L'abonné qui les écrit doit le
+    /// faire dans l'ordre reçu, et n'avoir aucune autre source d'écriture.
+    pub fn writes(&self) -> mpsc::UnboundedReceiver<String> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        // Sous le verrou de l'état, comme une publication.
+        let _state = self.state.lock().unwrap();
+        self.writes.0.lock().unwrap().push(sender);
+        receiver
+    }
+
     /// Vrai en pause.
     pub fn paused(&self) -> bool {
         *self.paused.borrow()
@@ -366,6 +385,7 @@ impl Engine {
         let history = Arc::clone(&self.history);
         let notifier = Arc::clone(&self.notifier);
         let config = Arc::clone(&self.config);
+        let writes = Arc::clone(&self.writes);
         let text = text.to_owned();
         async move {
             let (ticket, superseded) = match registration {
@@ -385,7 +405,7 @@ impl Engine {
                 result = pipeline.run(&text) => Some(result),
                 () = superseded.wait() => None,
             };
-            let outcome = settle(&state, ticket, &text, result);
+            let outcome = settle(&state, &writes, ticket, &text, result);
             // Le niveau de la config active quand le Pipeline finit.
             let level = config.read().unwrap().active.notifications();
             match &outcome {
@@ -440,7 +460,12 @@ impl Engine {
     /// l'Original d'avant elle est restauré. Ni historique ni notification :
     /// seule une copie y entre.
     pub fn restore_original(&self) -> Option<String> {
-        self.state.lock().unwrap().restore()
+        let mut state = self.state.lock().unwrap();
+        let original = state.restore();
+        if let Some(original) = &original {
+            self.writes.publish(original);
+        }
+        original
     }
 
     /// Les dernières transformations ([`HISTORY_CAP`] au plus), la plus récente
@@ -462,6 +487,7 @@ impl Engine {
 /// une copie plus récente (`None`).
 fn settle(
     state: &Mutex<State>,
+    writes: &Writes,
     ticket: Ticket,
     text: &str,
     result: Option<Result<String, Failure>>,
@@ -476,7 +502,25 @@ fn settle(
         Ok(output) if output.is_empty() => Outcome::Nothing(Skip::EmptyResult),
         Ok(output) => {
             state.transformed(ticket, text, &output);
+            // Sous le verrou : une copie plus récente ne peut ni passer devant
+            // ce résultat ni être recouverte par lui.
+            writes.publish(&output);
             Outcome::Write(output)
         }
+    }
+}
+
+/// Abonnés aux écritures décidées ([`Engine::writes`]).
+#[derive(Default)]
+struct Writes(Mutex<Vec<mpsc::UnboundedSender<String>>>);
+
+impl Writes {
+    /// Publie `text` à chaque abonné encore là ; à appeler sous le verrou de
+    /// l'état, au moment où l'écriture est décidée.
+    fn publish(&self, text: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .retain(|sender| sender.send(text.to_owned()).is_ok());
     }
 }
