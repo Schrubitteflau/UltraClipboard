@@ -1,12 +1,13 @@
 //! Transformation `youtube`, contre un faux service oEmbed local : aucun test ne
 //! touche Internet.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use engine::{Config, Endpoints, Engine, Outcome, SAMPLE_CONFIG};
+use tokio::sync::mpsc;
 
 const VIDEO: &str = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
 
@@ -33,6 +34,15 @@ enum Fake {
     Cuts,
     /// Redirige (302) `/oembed?…` vers `/moved?…`, qui se comporte comme `Knows`.
     Redirects,
+    /// Ne répond jamais ; signale `Heard` à la requête reçue, puis `HungUp`
+    /// quand le client ferme la connexion.
+    Hangs(mpsc::UnboundedSender<Hang>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Hang {
+    Heard,
+    HungUp,
 }
 
 /// Lance un faux service oEmbed sur un port local libre ; rend son adresse.
@@ -70,6 +80,13 @@ fn serve(mut stream: TcpStream, fake: Fake) {
             ("404 Not Found", "Not Found".to_owned())
         }
     };
+    if let Fake::Hangs(events) = &fake {
+        let _ = events.send(Hang::Heard);
+        // Bloque jusqu'à ce que le client coupe : lecture à 0 octet, ou erreur.
+        let _ = reader.read(&mut [0; 1]);
+        let _ = events.send(Hang::HungUp);
+        return;
+    }
     let mut location = String::new();
     let (status, body, length) = match fake {
         Fake::Knows => {
@@ -81,6 +98,7 @@ fn serve(mut stream: TcpStream, fake: Fake) {
             let (status, body) = known();
             (status, body.clone(), body.len())
         }
+        Fake::Hangs(_) => unreachable!(),
         Fake::Answers(status, body) => (status, body.clone(), body.len()),
         Fake::Cuts => ("200 OK", r#"{"title": "Ri"#.to_owned(), 500),
         Fake::Redirects => match path.strip_prefix("/moved") {
@@ -185,6 +203,30 @@ async fn a_response_slower_than_the_timeout_fails_the_pipeline_on_time() {
     };
     assert_eq!(failure.step, "youtube");
     assert!(failure.message.contains("0.3 s"), "{}", failure.message);
+}
+
+#[tokio::test]
+async fn a_newer_copy_drops_the_pending_request() {
+    let (events, mut heard) = mpsc::unbounded_channel();
+    let yaml = "config_version: 1\npipelines:\n  link: [youtube]\n  shout: [upper]\nrules:\n  - match: youtube\n    pipeline: link\n  - match: ''\n    pipeline: shout\n";
+    let oembed = fake_oembed(Fake::Hangs(events));
+    let engine = Engine::new(Config::parse_with(yaml, &Endpoints { oembed }).unwrap());
+    let soon = Duration::from_secs(2);
+    let started = Instant::now();
+    let video = tokio::spawn(engine.on_copy(VIDEO));
+    // La requête est partie avant qu'on copie autre chose.
+    let first = tokio::time::timeout(soon, heard.recv()).await;
+    assert_eq!(first, Ok(Some(Hang::Heard)));
+
+    assert_eq!(engine.on_copy("abc").await, Outcome::Write("ABC".into()));
+    assert_eq!(video.await.unwrap(), Outcome::Cancelled);
+    assert!(started.elapsed() < soon, "{:?}", started.elapsed());
+    let second = tokio::time::timeout(soon, heard.recv()).await;
+    assert_eq!(
+        second,
+        Ok(Some(Hang::HungUp)),
+        "la requête n'a pas été coupée"
+    );
 }
 
 /// Message d'échec de `youtube` sur une copie de `VIDEO` quand oEmbed répond ainsi.

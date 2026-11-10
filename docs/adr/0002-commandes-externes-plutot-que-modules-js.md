@@ -6,3 +6,4 @@ Le cadrage initial (BMAD) prévoyait des modules JavaScript exécutés dans un m
 
 - Pas d'isolation des scripts : une commande a les droits de l'utilisateur, comme n'importe quel script qu'il lance lui-même.
 - Un processus par exécution de `command` ; acceptable pour une copie humaine.
+- Un processus qu'une `command` détache de son groupe (`setsid`, démon par double fork) n'est pas tué à l'annulation ni au délai : seul le groupe de la commande l'est.
