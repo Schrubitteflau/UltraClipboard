@@ -1,8 +1,7 @@
 //! Rafale de `Copied` : l'ordre d'arrivée sur le bus est l'ordre des copies.
 
 mod common;
-use common::{Extension, PrivateBus};
-use engine::Engine;
+use common::{Extension, PrivateBus, upper_everything};
 use std::time::Duration;
 use ultraclipboard::serve;
 
@@ -15,7 +14,7 @@ const ROUNDS: usize = 50;
 async fn burst_last_copy_wins() {
     let bus = PrivateBus::start();
     let app = bus.connect().await;
-    serve(&app, Engine::new()).await.unwrap();
+    serve(&app, upper_everything()).await.unwrap();
     let mut ext = Extension::connect(&bus).await;
     let sender = bus.connect().await;
     let mut failures = 0;
