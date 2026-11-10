@@ -1,0 +1,23 @@
+# Config d'UltraClipboard, créée au premier lancement.
+# Tout enregistrement de ce fichier est pris en compte sans redémarrer.
+
+config_version: 1            # obligatoire ; seule la version 1 existe
+notifications: all           # all | errors | off
+
+# Pipelines nommés : suites de Transformations appliquées l'une après l'autre.
+# Transformations : trim, upper, lower, youtube, command.
+pipelines:
+  youtube-markdown:
+    - youtube:
+        template: "[{title}]({url}) — [{author_name}]({author_url})"
+  # clean:
+  #   - trim
+  #   - command: ["python3", "~/scripts/fix-numbers.py"]
+  #     timeout: 10
+  #   # Arrière-plan : rediriger ses sorties (`cmd >/dev/null 2>&1 &`), sinon l'étape attend le délai.
+
+# Règles : la première dont le motif (expression régulière) est trouvé dans le
+# texte copié applique son Pipeline ; aucune Règle = presse-papier intact.
+rules:
+  - match: '^https?://(www\.)?(youtube\.com/watch|youtu\.be/)'
+    pipeline: youtube-markdown

@@ -286,3 +286,12 @@ Session de grilling : 2026-11-09 → 2026-11-10
 - **Answer**: "j'ai installé les paquets système"
 - **Decision**: le ticket Tauri (#4) est `ready-for-agent`, pas `ready-for-human`.
 - **Spec**: not in spec
+
+## Livraison (/ship)
+
+### D39: Restaurer l'Original après une copie plus récente
+
+- **Asked**: (ticket #9) A a été transformé, puis B a été copié (en traitement, ou resté tel quel) ; que fait « restaurer l'Original » ? Option recommandée : n'annuler que la dernière transformation (si B est en traitement, l'arrêter et laisser B tel que copié ; si B est déjà là, ne rien faire), jamais écraser une copie récente par un texte plus ancien. Autre option : toujours remettre A, quitte à remplacer B.
+- **Answer**: "c'est toujours le dernier Ctrl+C qui écrase l'ancien, même si l'ancien est en cours de transformation"
+- **Decision**: la dernière copie gagne aussi face à la restauration : le raccourci ne remet jamais un texte plus ancien par-dessus une copie plus récente. Il annule seulement la dernière transformation : si B est en traitement, ce traitement est arrêté et B reste tel que copié ; sinon, rien ne change.
+- **Spec**: User Stories 12, 30
