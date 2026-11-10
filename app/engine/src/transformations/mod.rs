@@ -1,11 +1,17 @@
 //! Transformations : chaque fichier de ce dossier en définit une.
+//!
+//! [`build`] est le seul endroit qui relie un nom de la config à une
+//! Transformation : en ajouter une, c'est un fichier et une ligne ici.
 
-mod upper;
+mod case;
+mod trim;
+mod youtube;
 
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 
-pub(crate) use upper::Upper;
+use crate::config::yaml::Value;
 
 /// Futur rendu par [`Transformation::apply`].
 ///
@@ -33,4 +39,45 @@ pub struct StepError {
     pub message: String,
     /// Sortie d'erreur de l'étape, vide si elle n'en a pas.
     pub stderr: String,
+}
+
+/// Pourquoi une étape de la config n'a pas pu être construite.
+pub(crate) enum BuildError {
+    /// Aucune Transformation ne porte ce nom.
+    Unknown,
+    /// Paramètres refusés ; `field` est relatif aux paramètres (vide : les
+    /// paramètres dans leur ensemble).
+    Params { field: String, reason: String },
+}
+
+impl BuildError {
+    fn params(field: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::Params {
+            field: field.into(),
+            reason: reason.into(),
+        }
+    }
+}
+
+/// Construit l'étape `name` à partir de ses paramètres (`Null` si l'étape est
+/// écrite par son seul nom) et du `timeout` éventuel de l'étape.
+pub(crate) fn build(
+    name: &str,
+    params: &Value,
+    timeout: Option<Duration>,
+) -> Result<Box<dyn Transformation>, BuildError> {
+    match name {
+        "trim" => no_params(params).map(|()| Box::new(trim::Trim) as _),
+        "upper" => no_params(params).map(|()| Box::new(case::Upper) as _),
+        "lower" => no_params(params).map(|()| Box::new(case::Lower) as _),
+        "youtube" => youtube::build(params, timeout).map(|t| Box::new(t) as _),
+        _ => Err(BuildError::Unknown),
+    }
+}
+
+fn no_params(params: &Value) -> Result<(), BuildError> {
+    match params {
+        Value::Null => Ok(()),
+        _ => Err(BuildError::params("", "n'accepte pas de paramètre")),
+    }
 }
