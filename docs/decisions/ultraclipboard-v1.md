@@ -263,3 +263,26 @@ Session de grilling : 2026-11-09 → 2026-11-10
 - **Answer**: "je valide tout"
 - **Decision**: les huit choix sont des décisions de l'utilisateur.
 - **Spec**: Further Notes ; Implementation Decisions
+
+## Découpage en tickets (/to-tickets)
+
+### D36: Config invalide au premier lancement : démarrer sans Règle
+
+- **Asked**: config invalide au tout premier lancement (aucune ancienne config à garder) : démarrer sans aucune Règle (rien n'est transformé, erreur notifiée et visible dans la fenêtre, chargée dès que le fichier est corrigé), ou refuser de démarrer (boucle de redémarrages avec `Restart=on-failure`)
+- **Answer**: "je suis d'accord sur la question 2"
+- **Decision**: l'appli démarre sans aucune Règle et signale l'erreur ; elle ne refuse jamais de démarrer pour une config invalide.
+- **Spec**: not in spec (porté par le ticket #3)
+
+### D37: Découpage révisé après relecture par deux agents
+
+- **Asked**: découpage initial en 12 tickets, puis version révisée en 14 après deux relectures indépendantes (ticket de préparation : moteur asynchrone et `Copied` qui rend la main ; hébergement Tauri tôt ; raccourcis de l'extension regroupés ; dépendances corrigées ; tests de la spec répartis)
+- **Answer**: "demande à 2 subagents neutres ce qu'ils pensent de ce découpage" puis "ok on suit ce découpage"
+- **Decision**: 14 tickets, sous-issues de #1 (#2 à #15), avec dépendances natives GitHub.
+- **Spec**: not in spec (découpage)
+
+### D38: Prérequis système de Tauri installés
+
+- **Asked**: installer maintenant les paquets `-dev` (WebKitGTK, AppIndicator, librsvg, libsoup) pour que le ticket Tauri soit faisable par un agent
+- **Answer**: "j'ai installé les paquets système"
+- **Decision**: le ticket Tauri (#4) est `ready-for-agent`, pas `ready-for-human`.
+- **Spec**: not in spec
