@@ -6,11 +6,11 @@
 
 use std::process::ExitCode;
 
-use engine::Engine;
+use engine::{Config, Engine};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager, WindowEvent};
-use ultraclipboard::{BUS_NAME, ServeError, serve};
+use ultraclipboard::{BUS_NAME, ServeError, config_path, serve, startup_config};
 
 const MAIN_WINDOW: &str = "main";
 const MENU_OPEN: &str = "open";
@@ -49,8 +49,15 @@ fn main() -> ExitCode {
 }
 
 async fn start_service() -> Result<zbus::Connection, ServeError> {
+    let config = match config_path() {
+        Some(path) => startup_config(&path),
+        None => {
+            eprintln!("ultraclipboard: ni XDG_CONFIG_HOME ni HOME, aucune Règle active");
+            Config::default()
+        }
+    };
     let conn = zbus::connection::Builder::session().build().await?;
-    serve(&conn, Engine::new()).await?;
+    serve(&conn, Engine::new(config)).await?;
     Ok(conn)
 }
 

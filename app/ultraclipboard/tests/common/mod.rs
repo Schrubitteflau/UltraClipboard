@@ -6,9 +6,16 @@ use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use engine::{Config, Engine};
 use futures_util::StreamExt;
 use ultraclipboard::{BUS_NAME, INTERFACE, OBJECT_PATH};
 use zbus::{Connection, MatchRule, MessageStream, connection};
+
+/// Moteur dont l'unique Règle met toute copie en majuscules.
+pub fn upper_everything() -> Engine {
+    let yaml = "config_version: 1\npipelines:\n  shout: [upper]\nrules:\n  - match: ''\n    pipeline: shout\n";
+    Engine::new(Config::parse(yaml).unwrap())
+}
 
 /// Un `dbus-daemon` privé, arrêté à la fin du test. Ne touche jamais au bus de la session.
 pub struct PrivateBus {

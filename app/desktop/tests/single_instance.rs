@@ -1,11 +1,12 @@
-//! Une seule instance de l'appli : sur un bus privé, sans affichage.
+//! L'appli lancée en seconde instance, sur un bus privé et sans affichage :
+//! elle lit sa config puis s'arrête avant toute fenêtre.
 
 use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use engine::Engine;
+use engine::{Config, Engine};
 use ultraclipboard::serve;
 
 /// Un `dbus-daemon` privé, arrêté à la fin du test. Ne touche jamais au bus de la session.
@@ -40,20 +41,66 @@ impl Drop for PrivateBus {
 }
 
 /// Le nom est vérifié avant toute fenêtre : l'appli s'arrête sans jamais ouvrir
-/// d'affichage. L'enfant est coupé de tout affichage réel : pas de `DISPLAY` ni
-/// `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR` vide (sinon GTK retombe sur `wayland-0`,
-/// le compositeur de l'utilisateur) et un backend broadway que personne n'écoute.
+/// d'affichage.
 #[tokio::test]
 async fn the_app_stops_with_a_message_when_already_running() {
     let bus = PrivateBus::start();
-    let first = zbus::connection::Builder::address(bus.address.as_str())
+    let _first = first_instance(&bus).await;
+    let home = scratch("already-running");
+
+    let (status, stderr) = second_instance(&bus, &home);
+
+    assert!(!status.success());
+    assert!(stderr.contains("déjà lancé"), "stderr : {stderr}");
+    for trace in ["Gtk", "tauri", "panicked"] {
+        assert!(
+            !stderr.contains(trace),
+            "l'interface a démarré ; stderr : {stderr}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_app_takes_its_config_under_xdg_config_home() {
+    let bus = PrivateBus::start();
+    let _first = first_instance(&bus).await;
+    let home = scratch("xdg-config-home");
+
+    // Une seconde instance lit sa config avant de s'arrêter : elle crée l'exemple ici.
+    second_instance(&bus, &home);
+
+    let created = home
+        .join("config")
+        .join("ultraclipboard")
+        .join("config.yaml");
+    assert_eq!(
+        std::fs::read_to_string(&created).unwrap(),
+        engine::SAMPLE_CONFIG
+    );
+}
+
+async fn first_instance(bus: &PrivateBus) -> zbus::Connection {
+    let conn = zbus::connection::Builder::address(bus.address.as_str())
         .build()
         .await
         .unwrap();
-    serve(&first, Engine::new()).await.unwrap();
+    serve(&conn, Engine::new(Config::default())).await.unwrap();
+    conn
+}
 
-    let home = Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("single-instance-{}", std::process::id()));
+/// Dossier vide propre au test, dans le dossier temporaire de cargo.
+fn scratch(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("desktop-{name}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Lance le binaire sur `bus`, coupé de tout affichage réel : pas de `DISPLAY` ni
+/// `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR` vide (sinon GTK retombe sur `wayland-0`,
+/// le compositeur de l'utilisateur) et un backend broadway que personne n'écoute.
+/// Config, données et cache sous `home`. Échoue si l'appli ne s'arrête pas d'elle-même.
+fn second_instance(bus: &PrivateBus, home: &Path) -> (ExitStatus, String) {
     let runtime_dir = home.join("runtime");
     std::fs::create_dir_all(&runtime_dir).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_ultraclipboard"))
@@ -79,18 +126,9 @@ async fn the_app_stops_with_a_message_when_already_running() {
         .unwrap()
         .read_to_string(&mut stderr)
         .unwrap();
-    let _ = std::fs::remove_dir_all(&home);
-
     let status =
         status.unwrap_or_else(|| panic!("l'appli ne s'est pas arrêtée ; stderr : {stderr}"));
-    assert!(!status.success());
-    assert!(stderr.contains("déjà lancé"), "stderr : {stderr}");
-    for trace in ["Gtk", "tauri", "panicked"] {
-        assert!(
-            !stderr.contains(trace),
-            "l'interface a démarré ; stderr : {stderr}"
-        );
-    }
+    (status, stderr)
 }
 
 /// Attend la fin de `child` ; passé le délai, le tue et rend `None`.
