@@ -63,19 +63,38 @@ impl BuildError {
     }
 }
 
+/// Adresses des services en ligne appelés par les Transformations.
+///
+/// Réglées par l'appli, jamais par la config utilisateur : les tests y mettent
+/// un faux service local.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Endpoints {
+    /// Service oEmbed de YouTube (`youtube`).
+    pub oembed: String,
+}
+
+impl Default for Endpoints {
+    fn default() -> Self {
+        Self {
+            oembed: youtube::OEMBED.to_owned(),
+        }
+    }
+}
+
 /// Construit l'étape `name` à partir de ses paramètres (`Null` si l'étape est
 /// écrite par son seul nom) et du `timeout` éventuel de l'étape.
 pub(crate) fn build(
     name: &str,
     params: &Value,
     timeout: Option<Duration>,
+    endpoints: &Endpoints,
 ) -> Result<Box<dyn Transformation>, BuildError> {
     match name {
         "trim" => no_params(params).map(|()| Box::new(trim::Trim) as _),
         "upper" => no_params(params).map(|()| Box::new(case::Upper) as _),
         "lower" => no_params(params).map(|()| Box::new(case::Lower) as _),
         "command" => command::build(params, timeout).map(|t| Box::new(t) as _),
-        "youtube" => youtube::build(params, timeout).map(|t| Box::new(t) as _),
+        "youtube" => youtube::build(params, timeout, endpoints).map(|t| Box::new(t) as _),
         _ => Err(BuildError::Unknown),
     }
 }
