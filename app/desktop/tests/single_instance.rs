@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 use engine::{Config, Engine};
 use ultraclipboard::serve;
 
+/// Numéro du prochain bus privé de ce processus de test.
+static NEXT_BUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 /// Un `dbus-daemon` privé, arrêté à la fin du test. Ne touche jamais au bus de la session.
 struct PrivateBus {
     daemon: Child,
@@ -17,13 +20,14 @@ struct PrivateBus {
 
 impl PrivateBus {
     fn start() -> Self {
-        // Socket sous le dossier temporaire de cargo, pas dans /tmp : un démon
-        // tué ne le retire pas.
-        let sockets = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("dbus");
-        std::fs::create_dir_all(&sockets).unwrap();
         let mut daemon = Command::new("dbus-daemon")
             .args(["--session", "--nofork", "--print-address=1"])
-            .arg(format!("--address=unix:tmpdir={}", sockets.display()))
+            // Socket abstraite : un daemon tué ne laisse aucun fichier (`/tmp/dbus-…`).
+            .arg(format!(
+                "--address=unix:abstract=/ultraclipboard-test/{}-{}",
+                std::process::id(),
+                NEXT_BUS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ))
             .stdout(Stdio::piped())
             .spawn()
             .expect("dbus-daemon introuvable");
