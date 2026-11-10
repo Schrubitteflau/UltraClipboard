@@ -17,8 +17,13 @@ struct PrivateBus {
 
 impl PrivateBus {
     fn start() -> Self {
+        // Socket sous le dossier temporaire de cargo, pas dans /tmp : un démon
+        // tué ne le retire pas.
+        let sockets = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("dbus");
+        std::fs::create_dir_all(&sockets).unwrap();
         let mut daemon = Command::new("dbus-daemon")
             .args(["--session", "--nofork", "--print-address=1"])
+            .arg(format!("--address=unix:tmpdir={}", sockets.display()))
             .stdout(Stdio::piped())
             .spawn()
             .expect("dbus-daemon introuvable");
