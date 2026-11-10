@@ -3,12 +3,11 @@
 use std::future::Future;
 use std::path::PathBuf;
 
-use engine::{Config, Engine};
+use engine::Engine;
 use zbus::Connection;
 
-use crate::{
-    ConfigFollower, NotificationSender, ServeError, follow_config, queue_notifications, serve,
-};
+use crate::config::follow_config_at;
+use crate::{ConfigFollower, NotificationSender, ServeError, queue_notifications, serve};
 
 /// Appli démarrée : le service tourne tant que `conn` vit ; l'envoi des
 /// notifications et le suivi de la config s'arrêtent quand on la lâche.
@@ -29,21 +28,17 @@ pub struct Started {
 /// invalide au lancement est notifiée) mais envoyées seulement une fois le nom
 /// pris : une seconde instance refusée ne montre rien.
 ///
-/// Sans `path` (ni XDG_CONFIG_HOME ni HOME), aucune Règle n'est active.
+/// Sans `path` (ni XDG_CONFIG_HOME ni HOME), aucune Règle n'est active. Le
+/// moteur est celui de [`crate::start_engine`], la file de notifications en plus.
 pub async fn start_app<F, Fut>(path: Option<PathBuf>, connect: F) -> Result<Started, ServeError>
 where
     F: Fn() -> Fut,
     Fut: Future<Output = zbus::Result<Connection>>,
 {
-    let engine = Engine::new(Config::default());
+    // Aucune config chargée tant que le fichier n'est pas lu.
+    let engine = Engine::default();
     let pending = queue_notifications(&engine);
-    let follower = match path {
-        Some(path) => Some(follow_config(path, engine.clone())),
-        None => {
-            eprintln!("ultraclipboard: ni XDG_CONFIG_HOME ni HOME, aucune Règle active");
-            None
-        }
-    };
+    let follower = follow_config_at(path, &engine);
     let conn = connect().await?;
     serve(&conn, engine.clone()).await?;
     let sender = match connect().await {

@@ -16,7 +16,10 @@ mod transformations;
 use std::future::Future;
 use std::sync::{Arc, Mutex, RwLock};
 
-pub use config::{Config, ConfigError, Notifications, Rule, SAMPLE_CONFIG};
+use serde::Serialize;
+use tokio::sync::watch;
+
+pub use config::{Config, ConfigError, NamedPipeline, Notifications, Rule, SAMPLE_CONFIG, Step};
 pub use notify::Notification;
 pub use pipeline::Failure;
 pub use transformations::Endpoints;
@@ -50,10 +53,54 @@ pub enum Skip {
     EmptyResult,
 }
 
+/// Ce qui est chargé, pour l'afficher : la config active et le refus du dernier
+/// chargement, s'il a échoué (la config active est alors la précédente).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConfigState {
+    /// Règles de la config active, dans l'ordre du fichier.
+    pub rules: Vec<RuleState>,
+    /// Pipelines de la config active, dans l'ordre du fichier.
+    pub pipelines: Vec<NamedPipeline>,
+    /// Faux tant qu'aucune config n'a été acceptée (config refusée dès le
+    /// lancement) : aucune Règle n'est active.
+    pub loaded: bool,
+    /// Refus du dernier chargement ; `None` s'il a réussi.
+    pub error: Option<Refusal>,
+}
+
+/// Chargement refusé : pourquoi, et d'où vient le refus.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Refusal {
+    pub kind: RefusalKind,
+    #[serde(flatten)]
+    pub error: ConfigError,
+}
+
+/// D'où vient un refus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RefusalKind {
+    /// Le fichier est absent ou illisible ([`Engine::reject_config`]).
+    Unreadable,
+    /// Le contenu est invalide ([`Engine::load`]).
+    Invalid,
+}
+
+/// Une Règle de la config active.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RuleState {
+    /// Expression régulière telle qu'écrite.
+    pub pattern: String,
+    /// Nom du Pipeline appliqué.
+    pub pipeline: String,
+}
+
 /// Réagit aux copies. Bon marché à cloner : les clones partagent le même état.
 #[derive(Clone)]
 pub struct Engine {
     config: Arc<RwLock<Loaded>>,
+    /// Signalé à chaque chargement, accepté ou refusé.
+    changes: Arc<watch::Sender<()>>,
     state: Arc<Mutex<State>>,
     notifier: Arc<Notifier>,
 }
@@ -61,18 +108,39 @@ pub struct Engine {
 /// Config active et refus du dernier chargement, s'il a échoué.
 struct Loaded {
     active: Arc<Config>,
-    error: Option<ConfigError>,
+    /// Faux tant qu'aucune config n'a été acceptée.
+    loaded: bool,
+    error: Option<Refusal>,
+}
+
+impl Default for Engine {
+    /// Moteur sans config chargée (au lancement, avant de lire le fichier) :
+    /// aucune Règle, aucune copie transformée.
+    fn default() -> Self {
+        Self::with(Loaded {
+            active: Arc::default(),
+            loaded: false,
+            error: None,
+        })
+    }
 }
 
 impl Engine {
-    /// Moteur qui suit cette config. `Config::default()` : aucune Règle, aucune
-    /// copie transformée.
+    /// Moteur qui suit cette config, comptée comme chargée. `Config::default()` :
+    /// aucune Règle, aucune copie transformée. Sans config encore lue :
+    /// [`Engine::default`].
     pub fn new(config: Config) -> Self {
+        Self::with(Loaded {
+            active: Arc::new(config),
+            loaded: true,
+            error: None,
+        })
+    }
+
+    fn with(loaded: Loaded) -> Self {
         Self {
-            config: Arc::new(RwLock::new(Loaded {
-                active: Arc::new(config),
-                error: None,
-            })),
+            config: Arc::new(RwLock::new(loaded)),
+            changes: Arc::new(watch::Sender::new(())),
             state: Arc::default(),
             notifier: Arc::default(),
         }
@@ -85,22 +153,30 @@ impl Engine {
     /// l'active reste en place et l'erreur est retenue ([`Engine::config_error`]).
     pub fn load(&self, yaml: &str) -> Result<(), ConfigError> {
         let parsed = Config::parse(yaml);
-        let mut loaded = self.config.write().unwrap();
-        match parsed {
-            Ok(config) => {
-                loaded.active = Arc::new(config);
-                loaded.error = None;
-                Ok(())
+        let result = {
+            let mut loaded = self.config.write().unwrap();
+            match parsed {
+                Ok(config) => {
+                    loaded.active = Arc::new(config);
+                    loaded.loaded = true;
+                    loaded.error = None;
+                    Ok(())
+                }
+                Err(err) => {
+                    loaded.error = Some(Refusal {
+                        kind: RefusalKind::Invalid,
+                        error: err.clone(),
+                    });
+                    Err((err, loaded.active.notifications()))
+                }
             }
-            Err(err) => {
-                loaded.error = Some(err.clone());
-                let level = loaded.active.notifications();
-                drop(loaded);
-                self.notifier
-                    .send(level, Notification::ConfigRejected(err.clone()));
-                Err(err)
-            }
-        }
+        };
+        self.changes.send_replace(());
+        result.map_err(|(err, level)| {
+            self.notifier
+                .send(level, Notification::ConfigRejected(err.clone()));
+            err
+        })
     }
 
     /// La config n'a pas pu être lue (fichier illisible…) : l'active reste en
@@ -108,11 +184,41 @@ impl Engine {
     pub fn reject_config(&self, error: ConfigError) {
         let level = {
             let mut loaded = self.config.write().unwrap();
-            loaded.error = Some(error.clone());
+            loaded.error = Some(Refusal {
+                kind: RefusalKind::Unreadable,
+                error: error.clone(),
+            });
             loaded.active.notifications()
         };
+        self.changes.send_replace(());
         self.notifier
             .send(level, Notification::ConfigRejected(error));
+    }
+
+    /// Ce qui est chargé : Règles et Pipelines actifs, refus du dernier chargement.
+    pub fn config_state(&self) -> ConfigState {
+        let loaded = self.config.read().unwrap();
+        ConfigState {
+            rules: loaded
+                .active
+                .rules()
+                .iter()
+                .map(|rule| RuleState {
+                    pattern: rule.pattern().to_owned(),
+                    pipeline: rule.pipeline().to_owned(),
+                })
+                .collect(),
+            pipelines: loaded.active.pipelines().to_vec(),
+            loaded: loaded.loaded,
+            error: loaded.error.clone(),
+        }
+    }
+
+    /// Reçoit un signal à chaque chargement de config qui suit cet appel, accepté
+    /// ou refusé : de quoi relire [`Engine::config_state`]. Des chargements
+    /// rapprochés peuvent n'en donner qu'un.
+    pub fn config_changes(&self) -> watch::Receiver<()> {
+        self.changes.subscribe()
     }
 
     /// Config active.
@@ -123,7 +229,8 @@ impl Engine {
     /// Pourquoi le dernier chargement a été refusé ; `None` s'il a réussi (ou s'il
     /// n'y en a pas eu).
     pub fn config_error(&self) -> Option<ConfigError> {
-        self.config.read().unwrap().error.clone()
+        let loaded = self.config.read().unwrap();
+        loaded.error.as_ref().map(|refusal| refusal.error.clone())
     }
 
     /// S'abonne aux notifications que le moteur décide d'envoyer à partir de
