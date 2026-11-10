@@ -55,6 +55,70 @@ impl Value {
             other => other.kind().to_owned(),
         }
     }
+
+    /// La valeur sur une ligne, à la manière du YAML en ligne : `"abc"`,
+    /// `["a", 1]`, `clé: valeur, autre: 2` (accolades pour un dictionnaire imbriqué).
+    pub(crate) fn inline(&self) -> String {
+        match self {
+            Value::Map(entries) => entries
+                .iter()
+                .map(|(key, value)| format!("{key}: {}", value.inline_nested()))
+                .collect::<Vec<_>>()
+                .join(", "),
+            other => other.inline_nested(),
+        }
+    }
+
+    fn inline_nested(&self) -> String {
+        match self {
+            Value::Null => "null".to_owned(),
+            Value::Bool(b) => b.to_string(),
+            Value::Int(n) => n.to_string(),
+            Value::Float(x) => format!("{x:?}"),
+            Value::Str(s) => format!("\"{}\"", escape_invisible(s)),
+            Value::Seq(items) => format!(
+                "[{}]",
+                items
+                    .iter()
+                    .map(Value::inline_nested)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Value::Map(_) => format!("{{{}}}", self.inline()),
+        }
+    }
+}
+
+/// Le texte tel qu'écrit, sauf les caractères de contrôle et de direction
+/// (bidi), qui changeraient la ligne affichée sans s'y voir.
+fn escape_invisible(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c if c.is_control() || is_bidi_or_line_break(c) => {
+                out.push_str(&format!("\\u{{{:x}}}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Marques et contrôles de direction (bidi), séparateurs de ligne et de paragraphe.
+fn is_bidi_or_line_break(c: char) -> bool {
+    matches!(
+        c,
+        '\u{61c}'
+            | '\u{200e}'
+            | '\u{200f}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2066}'..='\u{2069}'
+    )
 }
 
 impl<'de> Deserialize<'de> for Value {
