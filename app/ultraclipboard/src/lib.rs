@@ -18,6 +18,7 @@ mod notifications;
 use std::fmt;
 
 use engine::{Engine, Outcome};
+use tokio::sync::mpsc::UnboundedReceiver;
 use zbus::fdo::{RequestNameFlags, RequestNameReply};
 use zbus::{Connection, interface, object_server::SignalEmitter};
 
@@ -56,10 +57,15 @@ impl From<zbus::Error> for ServeError {
 
 /// Expose le moteur sur `conn` et prend le nom du service.
 ///
-/// Rend la main une fois le service en place ; il tourne tant que `conn` vit.
+/// Rend la main une fois le service en place ; il tourne jusqu'à la fin du
+/// processus (ou de son runtime tokio), même si l'appelant lâche `conn` :
+/// l'émetteur de `Apply` en garde une copie, et la file qu'il vide reste
+/// ouverte tant que le moteur vit, lui-même tenu par le service de `conn`.
 /// Une seule instance : si le nom est déjà pris, renvoie [`ServeError::AlreadyRunning`]
 /// au lieu d'attendre en file.
 pub async fn serve(conn: &Connection, engine: Engine) -> Result<(), ServeError> {
+    // Abonné avant toute copie : aucune écriture décidée ne se perd.
+    let writes = engine.writes();
     conn.object_server()
         .at(OBJECT_PATH, Service { engine })
         .await?;
@@ -67,10 +73,28 @@ pub async fn serve(conn: &Connection, engine: Engine) -> Result<(), ServeError> 
         .request_name_with_flags(BUS_NAME, RequestNameFlags::DO_NOT_QUEUE)
         .await
     {
-        Ok(RequestNameReply::PrimaryOwner) => Ok(()),
+        Ok(RequestNameReply::PrimaryOwner) => {
+            emit_writes(SignalEmitter::new(conn, OBJECT_PATH)?.into_owned(), writes);
+            Ok(())
+        }
         Ok(_) | Err(zbus::Error::NameTaken) => Err(ServeError::AlreadyRunning),
         Err(err) => Err(err.into()),
     }
+}
+
+/// Seul émetteur de `Apply` : un à un, dans l'ordre où le moteur décide les
+/// écritures (résultats et restaurations). Sans lui, chaque copie émettrait le
+/// sien depuis sa tâche, et celui d'une copie dépassée pourrait arriver après
+/// celui d'une plus récente : la dernière copie ne gagnerait plus (US12).
+/// Aucune n'est sautée : l'anti-boucle attend l'écho de chacune.
+fn emit_writes(emitter: SignalEmitter<'static>, mut writes: UnboundedReceiver<String>) {
+    tokio::spawn(async move {
+        while let Some(text) = writes.recv().await {
+            if let Err(err) = Service::apply(&emitter, &text).await {
+                eprintln!("ultraclipboard: échec d'émission de Apply : {err}");
+            }
+        }
+    });
 }
 
 struct Service {
@@ -84,15 +108,15 @@ struct Service {
 impl Service {
     /// Signale une copie. Rend la main aussitôt : le traitement part en tâche de
     /// fond et son résultat arrive par `Apply`.
-    fn copied(&self, text: String, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
-        Self::settle(self.engine.on_copy(&text), emitter);
+    fn copied(&self, text: String) {
+        Self::settle(self.engine.on_copy(&text));
     }
 
     /// Réapplique les Règles à `text`, le contenu actuel du presse-papier
     /// (raccourci de l'extension) : comme `Copied`, mais aussi en pause et même
     /// si `text` est notre propre écriture. Résultat par `Apply`.
-    fn reapply(&self, text: String, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
-        Self::settle(self.engine.reapply(&text), emitter);
+    fn reapply(&self, text: String) {
+        Self::settle(self.engine.reapply(&text));
     }
 
     /// Met en pause (aucune copie transformée) ou reprend, jusqu'au redémarrage.
@@ -111,12 +135,9 @@ impl Service {
     /// d'avant la dernière Transformation appliquée. Sans Original, ou si une
     /// copie a été faite depuis : rien n'est écrit, et la copie en cours de
     /// traitement, s'il y en a une, s'arrête et reste telle que copiée.
-    async fn restore_original(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
-        if let Some(original) = self.engine.restore_original()
-            && let Err(err) = Self::apply(&emitter, &original).await
-        {
-            eprintln!("ultraclipboard: échec d'émission de Apply : {err}");
-        }
+    fn restore_original(&self) {
+        // L'Original, s'il y en a un, part par `Apply` depuis `emit_writes`.
+        self.engine.restore_original();
     }
 
     /// Demande à l'extension d'écrire ce texte dans le presse-papier.
@@ -125,26 +146,18 @@ impl Service {
 }
 
 impl Service {
-    /// Lance le traitement en tâche de fond ; un texte à écrire part par `Apply`.
-    fn settle(
-        work: impl std::future::Future<Output = Outcome> + Send + 'static,
-        emitter: SignalEmitter<'_>,
-    ) {
-        let emitter = emitter.into_owned();
+    /// Lance le traitement en tâche de fond ; un texte à écrire part par
+    /// `Apply` depuis `emit_writes`, publié par le moteur au moment décidé.
+    fn settle(work: impl std::future::Future<Output = Outcome> + Send + 'static) {
         tokio::spawn(async move {
             match work.await {
-                Outcome::Write(output) => {
-                    if let Err(err) = Self::apply(&emitter, &output).await {
-                        eprintln!("ultraclipboard: échec d'émission de Apply : {err}");
-                    }
-                }
                 // Jamais la sortie d'erreur : elle peut contenir le texte copié et
                 // ce journal est persistant. Elle reste dans l'historique, en mémoire.
                 Outcome::Failed(failure) => eprintln!(
                     "ultraclipboard: échec de l'étape {} : {}",
                     failure.step, failure.message
                 ),
-                Outcome::Nothing(_) | Outcome::Cancelled => {}
+                Outcome::Write(_) | Outcome::Nothing(_) | Outcome::Cancelled => {}
             }
         });
     }
