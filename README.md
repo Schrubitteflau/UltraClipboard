@@ -24,6 +24,7 @@ Comportements garantis :
 - **Coller trop tôt** (avant la fin d'une Transformation lente) donne l'Original.
 - **Restaurer l'Original** : un raccourci remet le texte d'avant la dernière Transformation.
 - **Pause** depuis le menu de l'icône ; la restauration reste disponible.
+- **Notifications** : « ✓ <Pipeline> » quand un résultat est dans le presse-papier (la bulle remplace celle du succès précédent) ; « ✗ <Pipeline> » quand un Pipeline échoue, avec l'étape et la cause, ou rend un texte vide (« résultat vide : presse-papier inchangé ») ; « Config invalide » à chaque enregistrement d'une config refusée. Niveau `notifications` de la config (`all` : tout ; `errors` : échecs et config invalide ; `off` : rien), et « Couper / Rétablir les notifications » dans le menu de l'icône jusqu'au redémarrage.
 
 ## Configuration
 
@@ -60,7 +61,7 @@ rules:                      # la première Règle qui correspond gagne
 
 ## Interface
 
-- **Icône dans la barre du haut**, menu : Ouvrir, Pause/Reprendre, Notifications on/off (jusqu'au redémarrage), Quitter.
+- **Icône dans la barre du haut**, menu : Ouvrir, Pause/Reprendre, Couper/Rétablir les notifications (jusqu'au redémarrage), Quitter.
 - **Fenêtre en lecture seule** : Règles et Pipelines chargés, historique.
 - **Historique** : les 50 dernières transformations (Original, résultat, Pipeline, heure, succès/erreur), **en mémoire seulement**, perdu au redémarrage. Rien du presse-papier n'est écrit sur disque.
 

@@ -8,6 +8,7 @@
 //! remplacée à tout moment ([`Engine::load`]) sans perdre l'état du moteur.
 
 mod config;
+mod notify;
 mod pipeline;
 mod state;
 mod transformations;
@@ -16,9 +17,11 @@ use std::future::Future;
 use std::sync::{Arc, Mutex, RwLock};
 
 pub use config::{Config, ConfigError, Notifications, Rule, SAMPLE_CONFIG};
+pub use notify::Notification;
 pub use pipeline::Failure;
 pub use transformations::Endpoints;
 
+use notify::Notifier;
 use state::{Registration, State};
 
 /// Issue d'une copie.
@@ -52,6 +55,7 @@ pub enum Skip {
 pub struct Engine {
     config: Arc<RwLock<Loaded>>,
     state: Arc<Mutex<State>>,
+    notifier: Arc<Notifier>,
 }
 
 /// Config active et refus du dernier chargement, s'il a échoué.
@@ -70,6 +74,7 @@ impl Engine {
                 error: None,
             })),
             state: Arc::default(),
+            notifier: Arc::default(),
         }
     }
 
@@ -89,6 +94,10 @@ impl Engine {
             }
             Err(err) => {
                 loaded.error = Some(err.clone());
+                let level = loaded.active.notifications();
+                drop(loaded);
+                self.notifier
+                    .send(level, Notification::ConfigRejected(err.clone()));
                 Err(err)
             }
         }
@@ -97,7 +106,13 @@ impl Engine {
     /// La config n'a pas pu être lue (fichier illisible…) : l'active reste en
     /// place et cette erreur est retenue comme celle d'un chargement refusé.
     pub fn reject_config(&self, error: ConfigError) {
-        self.config.write().unwrap().error = Some(error);
+        let level = {
+            let mut loaded = self.config.write().unwrap();
+            loaded.error = Some(error.clone());
+            loaded.active.notifications()
+        };
+        self.notifier
+            .send(level, Notification::ConfigRejected(error));
     }
 
     /// Config active.
@@ -109,6 +124,24 @@ impl Engine {
     /// n'y en a pas eu).
     pub fn config_error(&self) -> Option<ConfigError> {
         self.config.read().unwrap().error.clone()
+    }
+
+    /// S'abonne aux notifications que le moteur décide d'envoyer à partir de
+    /// maintenant. L'appli les montre telles quelles.
+    pub fn subscribe_notifications(&self) -> tokio::sync::broadcast::Receiver<Notification> {
+        self.notifier.subscribe()
+    }
+
+    /// Coupe (ou rétablit) toutes les notifications jusqu'au redémarrage, quel
+    /// que soit le niveau de la config. Rétablies, elles suivent de nouveau ce
+    /// niveau.
+    pub fn set_notifications_muted(&self, muted: bool) {
+        self.notifier.set_muted(muted);
+    }
+
+    /// Vrai si les notifications sont coupées pour la session.
+    pub fn notifications_muted(&self) -> bool {
+        self.notifier.muted()
     }
 
     /// Signale une copie sans texte (image, fichiers…).
@@ -138,15 +171,17 @@ impl Engine {
             .unwrap()
             .active
             .rule_for(text)
-            .map(Rule::run);
+            .map(|rule| (rule.pipeline().to_owned(), rule.run()));
         let state = Arc::clone(&self.state);
+        let notifier = Arc::clone(&self.notifier);
+        let config = Arc::clone(&self.config);
         let text = text.to_owned();
         async move {
             let (ticket, superseded) = match registration {
                 Registration::OwnWrite => return Outcome::Nothing(Skip::OwnWrite),
                 Registration::Accepted(ticket, superseded) => (ticket, superseded),
             };
-            let Some(pipeline) = pipeline else {
+            let Some((name, pipeline)) = pipeline else {
                 return Outcome::Nothing(Skip::NoRule);
             };
             // Une copie plus récente arrête le Pipeline sur place : l'étape en
@@ -156,19 +191,40 @@ impl Engine {
                 result = pipeline.run(&text) => result,
                 () = superseded.wait() => return Outcome::Cancelled,
             };
-            let mut state = state.lock().unwrap();
-            if !state.is_current(ticket) {
-                return Outcome::Cancelled;
-            }
-            match result {
-                Err(failure) => Outcome::Failed(failure),
-                Ok(output) if output == text => Outcome::Nothing(Skip::Unchanged),
-                Ok(output) if output.is_empty() => Outcome::Nothing(Skip::EmptyResult),
-                Ok(output) => {
-                    state.wrote(&output);
-                    Outcome::Write(output)
+            let outcome = {
+                let mut state = state.lock().unwrap();
+                if !state.is_current(ticket) {
+                    return Outcome::Cancelled;
                 }
+                match result {
+                    Err(failure) => Outcome::Failed(failure),
+                    Ok(output) if output == text => Outcome::Nothing(Skip::Unchanged),
+                    Ok(output) if output.is_empty() => Outcome::Nothing(Skip::EmptyResult),
+                    Ok(output) => {
+                        state.wrote(&output);
+                        Outcome::Write(output)
+                    }
+                }
+            };
+            // Le niveau de la config active quand le Pipeline finit.
+            let level = config.read().unwrap().active.notifications();
+            match &outcome {
+                Outcome::Write(_) => {
+                    notifier.send(level, Notification::Succeeded { pipeline: name })
+                }
+                Outcome::Failed(failure) => notifier.send(
+                    level,
+                    Notification::Failed {
+                        pipeline: name,
+                        failure: failure.clone(),
+                    },
+                ),
+                Outcome::Nothing(Skip::EmptyResult) => {
+                    notifier.send(level, Notification::EmptyResult { pipeline: name })
+                }
+                Outcome::Nothing(_) | Outcome::Cancelled => {}
             }
+            outcome
         }
     }
 }

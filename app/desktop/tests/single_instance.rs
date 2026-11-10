@@ -88,6 +88,59 @@ async fn the_app_takes_its_config_under_xdg_config_home() {
     );
 }
 
+/// Une seconde instance refusée ne montre rien, même une config invalide qu'elle
+/// a lue avant de s'arrêter.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_instance_shows_no_notification() {
+    let bus = PrivateBus::start();
+    let _first = first_instance(&bus).await;
+    let (shown, mut notifications) = tokio::sync::mpsc::unbounded_channel();
+    let _desktop = zbus::connection::Builder::address(bus.address.as_str())
+        .name("org.freedesktop.Notifications")
+        .serve_at(
+            "/org/freedesktop/Notifications",
+            FakeNotifications { shown },
+        )
+        .build()
+        .await
+        .unwrap();
+    let home = scratch("refused-invalid-config");
+    let config = home.join("config").join("ultraclipboard");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join("config.yaml"), "rules: []\n").unwrap();
+
+    let (status, stderr) = second_instance(&bus, &home);
+
+    assert!(!status.success());
+    assert!(stderr.contains("déjà lancé"), "stderr : {stderr}");
+    let notified = tokio::time::timeout(Duration::from_millis(300), notifications.recv()).await;
+    assert!(notified.is_err(), "notification montrée : {notified:?}");
+}
+
+/// Faux service de notifications du bureau : signale chaque titre reçu.
+struct FakeNotifications {
+    shown: tokio::sync::mpsc::UnboundedSender<String>,
+}
+
+#[zbus::interface(name = "org.freedesktop.Notifications")]
+impl FakeNotifications {
+    #[allow(clippy::too_many_arguments)]
+    fn notify(
+        &self,
+        _app_name: String,
+        _replaces_id: u32,
+        _app_icon: String,
+        summary: String,
+        _body: String,
+        _actions: Vec<String>,
+        _hints: std::collections::HashMap<String, zbus::OwnedVariant>,
+        _expire_timeout: i32,
+    ) -> u32 {
+        let _ = self.shown.send(summary);
+        1
+    }
+}
+
 async fn first_instance(bus: &PrivateBus) -> zbus::Connection {
     let conn = zbus::connection::Builder::address(bus.address.as_str())
         .build()
