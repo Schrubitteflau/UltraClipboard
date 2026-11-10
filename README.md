@@ -90,3 +90,15 @@ détection de l'application de destination (impossible sous GNOME/Wayland).
 5. Fenêtre Svelte, puis icône et menu.
 
 Le moteur Rust est développé en TDD.
+
+## Outils similaires
+
+Pas tout à fait ce que tu cherches ? Voici une liste non exhaustive d'outils proches :
+
+- **[espanso](https://espanso.org/)** ([source](https://github.com/espanso/espanso)) : expansion de texte. Linux, Windows, macOS.
+- **[AutoHotkey](https://www.autohotkey.com/)** ([source](https://github.com/AutoHotkey/AutoHotkey)) : automatisation clavier et scripts. Windows.
+- **[Keyboard Maestro](https://www.keyboardmaestro.com/)** : automatisation, macros. macOS, payant.
+- **[Hammerspoon](https://www.hammerspoon.org/)** ([source](https://github.com/Hammerspoon/hammerspoon)) : automatisation scriptée en Lua. macOS.
+- **[Ditto](https://sabrogden.github.io/Ditto/)** ([source](https://github.com/sabrogden/Ditto)) : gestionnaire de presse-papier. Windows.
+- **[ClipboardFusion](https://www.clipboardfusion.com/)** : presse-papier avec macros. Windows, macOS.
+- **[CopyQ](https://hluk.github.io/CopyQ/)** ([source](https://github.com/hluk/CopyQ)) : gestionnaire de presse-papier scriptable. Linux, Windows, macOS.
