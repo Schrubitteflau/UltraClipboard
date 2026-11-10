@@ -340,6 +340,12 @@ async fn an_answer_cut_short_fails_the_pipeline() {
         "{}",
         failure.message
     );
+    // Le message part dans le journal du service : jamais le texte copié.
+    assert!(
+        !failure.message.contains("dQw4w9WgXcQ"),
+        "{}",
+        failure.message
+    );
 }
 
 /// Horloge de test figée : elle avance d'un coup jusqu'au délai, sans attendre 10 s.
@@ -370,6 +376,12 @@ async fn an_unreachable_service_fails_the_pipeline() {
     };
     assert!(
         failure.message.contains("injoignable"),
+        "{}",
+        failure.message
+    );
+    // Le message part dans le journal du service : jamais le texte copié.
+    assert!(
+        !failure.message.contains("dQw4w9WgXcQ"),
         "{}",
         failure.message
     );

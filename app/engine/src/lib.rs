@@ -8,6 +8,7 @@
 //! remplacée à tout moment ([`Engine::load`]) sans perdre l'état du moteur.
 
 mod config;
+mod history;
 mod notify;
 mod pipeline;
 mod state;
@@ -15,17 +16,20 @@ mod transformations;
 
 use std::future::Future;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::SystemTime;
 
 use serde::Serialize;
 use tokio::sync::watch;
 
 pub use config::{Config, ConfigError, NamedPipeline, Notifications, Rule, SAMPLE_CONFIG, Step};
+pub use history::{HISTORY_CAP, HistoryEntry, HistoryStatus, TEXT_CAP};
 pub use notify::Notification;
 pub use pipeline::Failure;
 pub use transformations::Endpoints;
 
+use history::History;
 use notify::Notifier;
-use state::{Registration, State};
+use state::{Registration, State, Ticket};
 
 /// Issue d'une copie.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +106,8 @@ pub struct Engine {
     /// Signalé à chaque chargement, accepté ou refusé.
     changes: Arc<watch::Sender<()>>,
     state: Arc<Mutex<State>>,
+    /// Hors de la config : un rechargement ne le touche pas.
+    history: Arc<Mutex<History>>,
     notifier: Arc<Notifier>,
 }
 
@@ -142,6 +148,7 @@ impl Engine {
             config: Arc::new(RwLock::new(loaded)),
             changes: Arc::new(watch::Sender::new(())),
             state: Arc::default(),
+            history: Arc::default(),
             notifier: Arc::default(),
         }
     }
@@ -272,14 +279,23 @@ impl Engine {
     pub fn on_copy(&self, text: &str) -> impl Future<Output = Outcome> + Send + use<> {
         // Toute copie (même sans Règle) est enregistrée : elle annule celle en cours.
         let registration = self.state.lock().unwrap().register(text);
-        let pipeline = self
+        let at = SystemTime::now();
+        let matched = self
             .config
             .read()
             .unwrap()
             .active
             .rule_for(text)
-            .map(|rule| (rule.pipeline().to_owned(), rule.run()));
+            .map(|rule| {
+                let pipeline = rule.run();
+                (
+                    rule.pattern().to_owned(),
+                    rule.pipeline().to_owned(),
+                    pipeline,
+                )
+            });
         let state = Arc::clone(&self.state);
+        let history = Arc::clone(&self.history);
         let notifier = Arc::clone(&self.notifier);
         let config = Arc::clone(&self.config);
         let text = text.to_owned();
@@ -288,50 +304,90 @@ impl Engine {
                 Registration::OwnWrite => return Outcome::Nothing(Skip::OwnWrite),
                 Registration::Accepted(ticket, superseded) => (ticket, superseded),
             };
-            let Some((name, pipeline)) = pipeline else {
+            let Some((rule, name, pipeline)) = matched else {
                 return Outcome::Nothing(Skip::NoRule);
             };
             // Une copie plus récente arrête le Pipeline sur place : l'étape en
             // cours est abandonnée (processus d'une `command` tué, requête
             // `youtube` coupée) et les suivantes ne tournent pas.
             let result = tokio::select! {
-                result = pipeline.run(&text) => result,
-                () = superseded.wait() => return Outcome::Cancelled,
+                result = pipeline.run(&text) => Some(result),
+                () = superseded.wait() => None,
             };
-            let outcome = {
-                let mut state = state.lock().unwrap();
-                if !state.is_current(ticket) {
-                    return Outcome::Cancelled;
-                }
-                match result {
-                    Err(failure) => Outcome::Failed(failure),
-                    Ok(output) if output == text => Outcome::Nothing(Skip::Unchanged),
-                    Ok(output) if output.is_empty() => Outcome::Nothing(Skip::EmptyResult),
-                    Ok(output) => {
-                        state.wrote(&output);
-                        Outcome::Write(output)
-                    }
-                }
-            };
+            let outcome = settle(&state, ticket, &text, result);
             // Le niveau de la config active quand le Pipeline finit.
             let level = config.read().unwrap().active.notifications();
             match &outcome {
-                Outcome::Write(_) => {
-                    notifier.send(level, Notification::Succeeded { pipeline: name })
-                }
+                Outcome::Write(_) => notifier.send(
+                    level,
+                    Notification::Succeeded {
+                        pipeline: name.clone(),
+                    },
+                ),
                 Outcome::Failed(failure) => notifier.send(
                     level,
                     Notification::Failed {
-                        pipeline: name,
+                        pipeline: name.clone(),
                         failure: failure.clone(),
                     },
                 ),
-                Outcome::Nothing(Skip::EmptyResult) => {
-                    notifier.send(level, Notification::EmptyResult { pipeline: name })
-                }
+                Outcome::Nothing(Skip::EmptyResult) => notifier.send(
+                    level,
+                    Notification::EmptyResult {
+                        pipeline: name.clone(),
+                    },
+                ),
                 Outcome::Nothing(_) | Outcome::Cancelled => {}
             }
+            // Annulée, échouée ou réussie : la copie entre dans l'historique.
+            if let Some(status) = HistoryStatus::of(&outcome, &text) {
+                let entry = HistoryEntry {
+                    at,
+                    rule,
+                    pipeline: name,
+                    original: text,
+                    status,
+                };
+                history.lock().unwrap().record(ticket, entry);
+            }
             outcome
+        }
+    }
+
+    /// Les dernières transformations ([`HISTORY_CAP`] au plus), la plus récente
+    /// en tête : une entrée par copie qui a déclenché un Pipeline. En mémoire
+    /// seulement ; conservé quand la config change.
+    pub fn history(&self) -> Vec<HistoryEntry> {
+        self.history.lock().unwrap().entries()
+    }
+
+    /// Reçoit un signal à chaque entrée ajoutée à l'historique après cet appel :
+    /// de quoi relire [`Engine::history`]. Des ajouts rapprochés peuvent n'en
+    /// donner qu'un.
+    pub fn history_changes(&self) -> watch::Receiver<()> {
+        self.history.lock().unwrap().subscribe()
+    }
+}
+
+/// Issue d'un Pipeline qui a tourné jusqu'au bout (`Some`) ou a été arrêté par
+/// une copie plus récente (`None`).
+fn settle(
+    state: &Mutex<State>,
+    ticket: Ticket,
+    text: &str,
+    result: Option<Result<String, Failure>>,
+) -> Outcome {
+    let mut state = state.lock().unwrap();
+    let Some(result) = result.filter(|_| state.is_current(ticket)) else {
+        return Outcome::Cancelled;
+    };
+    match result {
+        Err(failure) => Outcome::Failed(failure),
+        Ok(output) if output == text => Outcome::Nothing(Skip::Unchanged),
+        Ok(output) if output.is_empty() => Outcome::Nothing(Skip::EmptyResult),
+        Ok(output) => {
+            state.wrote(&output);
+            Outcome::Write(output)
         }
     }
 }

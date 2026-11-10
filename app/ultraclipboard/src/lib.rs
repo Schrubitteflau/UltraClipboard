@@ -90,17 +90,12 @@ impl Service {
                         eprintln!("ultraclipboard: échec d'émission de Apply : {err}");
                     }
                 }
-                Outcome::Failed(failure) => {
-                    let mut line = format!(
-                        "ultraclipboard: échec de l'étape {} : {}",
-                        failure.step, failure.message
-                    );
-                    let stderr = failure.stderr.trim_end_matches('\n');
-                    if !stderr.is_empty() {
-                        line = format!("{line}\n{stderr}");
-                    }
-                    eprintln!("{line}");
-                }
+                // Jamais la sortie d'erreur : elle peut contenir le texte copié et
+                // ce journal est persistant. Elle reste dans l'historique, en mémoire.
+                Outcome::Failed(failure) => eprintln!(
+                    "ultraclipboard: échec de l'étape {} : {}",
+                    failure.step, failure.message
+                ),
                 Outcome::Nothing(_) | Outcome::Cancelled => {}
             }
         });
