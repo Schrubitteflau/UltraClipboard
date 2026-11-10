@@ -1,9 +1,11 @@
 //! Service D-Bus d'UltraClipboard, sans fenêtre : utilisé par l'hôte Tauri
 //! (`app/desktop`, binaire `ultraclipboard`) et par les tests de contrat.
 //!
-//! L'extension GNOME Shell appelle `Copied(text)` à chaque copie ; quand un
+//! L'extension GNOME Shell appelle `Copied(text)` à chaque copie de texte, et
+//! `CopiedNonText()` à chaque copie sans texte (image, fichiers…) ; quand un
 //! résultat est prêt, le service émet le signal `Apply(text)` et l'extension
-//! l'écrit dans le presse-papier.
+//! l'écrit dans le presse-papier. Toute copie, texte ou non, arrête le
+//! traitement de la précédente.
 
 mod config;
 
@@ -98,6 +100,13 @@ impl Service {
                 Outcome::Nothing(_) | Outcome::Cancelled => {}
             }
         });
+    }
+
+    /// Signale une copie sans texte (image, fichiers…) : rien à transformer,
+    /// mais le traitement d'une copie précédente s'arrête et son résultat ne
+    /// remplace jamais ce qui vient d'être copié.
+    fn copied_non_text(&self) {
+        self.engine.on_copy_without_text();
     }
 
     /// Demande à l'extension d'écrire ce texte dans le presse-papier.

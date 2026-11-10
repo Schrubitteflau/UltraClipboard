@@ -15,8 +15,8 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 pub use config::{Config, ConfigError, Notifications, Rule, SAMPLE_CONFIG};
-pub use pipeline::{Failure, Pipeline};
-pub use transformations::{Endpoints, StepError, StepFuture, Transformation};
+pub use pipeline::Failure;
+pub use transformations::Endpoints;
 
 use state::{Registration, State};
 
@@ -63,13 +63,13 @@ impl Engine {
         }
     }
 
-    /// Moteur qui applique ce Pipeline à toutes les copies.
+    /// Signale une copie sans texte (image, fichiers…).
     ///
-    /// Seam de test temporaire : permet aux tests de brancher une étape lente.
-    /// À retirer par le ticket #8 : une vraie étape `command` (`sleep`) peut
-    /// désormais jouer ce rôle.
-    pub fn with_pipeline(pipeline: Pipeline) -> Self {
-        Self::new(Config::match_all("test", pipeline))
+    /// Rien n'est écrit, mais c'est une copie plus récente : le traitement
+    /// d'une copie en cours s'arrête, son issue est [`Outcome::Cancelled`] et
+    /// son résultat ne remplace jamais ce qui vient d'être copié.
+    pub fn on_copy_without_text(&self) {
+        self.state.lock().unwrap().register_without_text();
     }
 
     /// Signale une copie.
@@ -78,8 +78,9 @@ impl Engine {
     /// copies, donc l'appelant doit appeler `on_copy` dans l'ordre d'arrivée (pour
     /// le service D-Bus, l'ordre des appels `Copied` sur le bus). Le traitement se
     /// fait dans le futur rendu, qui ne dépend pas de `self` et peut être lancé en
-    /// tâche de fond. Si une autre copie est signalée avant qu'il se termine, son
-    /// issue est [`Outcome::Cancelled`] et son résultat est jeté.
+    /// tâche de fond. Si une autre copie est signalée avant qu'il se termine, il
+    /// s'arrête aussitôt (l'étape en cours est abandonnée : processus tué, requête
+    /// coupée) et son issue est [`Outcome::Cancelled`].
     pub fn on_copy(&self, text: &str) -> impl Future<Output = Outcome> + Send + use<> {
         // Toute copie (même sans Règle) est enregistrée : elle annule celle en cours.
         let registration = self.state.lock().unwrap().register(text);
@@ -87,14 +88,20 @@ impl Engine {
         let state = Arc::clone(&self.state);
         let text = text.to_owned();
         async move {
-            let ticket = match registration {
+            let (ticket, superseded) = match registration {
                 Registration::OwnWrite => return Outcome::Nothing(Skip::OwnWrite),
-                Registration::Accepted(ticket) => ticket,
+                Registration::Accepted(ticket, superseded) => (ticket, superseded),
             };
             let Some(pipeline) = pipeline else {
                 return Outcome::Nothing(Skip::NoRule);
             };
-            let result = pipeline.run(&text).await;
+            // Une copie plus récente arrête le Pipeline sur place : l'étape en
+            // cours est abandonnée (processus d'une `command` tué, requête
+            // `youtube` coupée) et les suivantes ne tournent pas.
+            let result = tokio::select! {
+                result = pipeline.run(&text) => result,
+                () = superseded.wait() => return Outcome::Cancelled,
+            };
             let mut state = state.lock().unwrap();
             if !state.is_current(ticket) {
                 return Outcome::Cancelled;

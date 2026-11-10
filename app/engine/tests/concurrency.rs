@@ -1,81 +1,109 @@
-//! Copies qui se chevauchent, et échec d'une étape.
+//! La dernière copie gagne : une copie plus récente arrête le Pipeline en cours,
+//! avec de vrais processus.
 
-use std::sync::Arc;
-use std::time::Duration;
+mod common;
 
-use engine::{Engine, Failure, Outcome, Pipeline, StepError, StepFuture, Transformation};
-use tokio::sync::{Notify, Semaphore};
+use std::path::Path;
+use std::time::{Duration, Instant};
 
-/// Met en majuscules ; sur « slow », prévient le test (`reached`) puis bloque
-/// jusqu'à ce qu'il ouvre la barrière (`gate`).
-struct GatedUpper {
-    reached: Arc<Notify>,
-    gate: Arc<Semaphore>,
-}
+use common::{pids_written_to, scratch, wait_dead};
+use engine::{Config, Engine, Outcome};
 
-impl Transformation for GatedUpper {
-    fn name(&self) -> &str {
-        "gated-upper"
-    }
+/// Bien en deçà du délai des commandes lentes (5 s).
+const PROMPTLY: Duration = Duration::from_secs(2);
 
-    fn apply<'a>(&'a self, input: &'a str) -> StepFuture<'a> {
-        Box::pin(async move {
-            if input == "slow" {
-                self.reached.notify_one();
-                let _permit = self.gate.acquire().await.unwrap();
-            }
-            Ok(input.to_uppercase())
-        })
-    }
-}
-
-struct Broken;
-
-impl Transformation for Broken {
-    fn name(&self) -> &str {
-        "broken"
-    }
-
-    fn apply<'a>(&'a self, _input: &'a str) -> StepFuture<'a> {
-        Box::pin(async {
-            Err(StepError {
-                message: "exit status 1".into(),
-                stderr: "boom".into(),
-            })
-        })
-    }
-}
-
-#[tokio::test]
-async fn a_copy_during_a_slow_one_is_processed_without_waiting() {
-    let reached = Arc::new(Notify::new());
-    let gate = Arc::new(Semaphore::new(0));
-    let engine = Engine::with_pipeline(Pipeline::new(vec![Box::new(GatedUpper {
-        reached: reached.clone(),
-        gate: gate.clone(),
-    })]));
-
-    let slow = tokio::spawn(engine.on_copy("slow"));
-    // La copie lente est bien en cours de traitement avant la suivante.
-    reached.notified().await;
-    let fast = tokio::time::timeout(Duration::from_secs(2), engine.on_copy("abc"))
-        .await
-        .expect("la seconde copie a attendu la fin de la première");
-    assert_eq!(fast, Outcome::Write("ABC".into()));
-
-    gate.add_permits(1);
-    assert_eq!(slow.await.unwrap(), Outcome::Cancelled);
-}
-
-#[tokio::test]
-async fn a_failing_step_leaves_the_clipboard_alone_and_says_why() {
-    let engine = Engine::with_pipeline(Pipeline::new(vec![Box::new(Broken)]));
-    assert_eq!(
-        engine.on_copy("abc").await,
-        Outcome::Failed(Failure {
-            step: "broken".into(),
-            message: "exit status 1".into(),
-            stderr: "boom".into(),
-        })
+/// « slow » passe par le Pipeline `steps` (étapes YAML en style bloc, indentées
+/// de quatre espaces), dont le premier argument `"$0"` des commandes est
+/// `pidfile` ; toute autre copie est mise en majuscules.
+fn engine(steps: &str, pidfile: &Path) -> Engine {
+    let steps = steps.replace("PIDFILE", &pidfile.display().to_string());
+    let yaml = format!(
+        "config_version: 1\npipelines:\n  slow:\n{steps}\n  shout: [upper]\nrules:\n  - match: '^slow$'\n    pipeline: slow\n  - match: ''\n    pipeline: shout\n"
     );
+    Engine::new(Config::parse(&yaml).unwrap())
+}
+
+/// Commande qui écrit son numéro de processus puis dort 30 s (délai 5 s).
+const SLEEPS: &str =
+    "    - command: [sh, -c, 'echo $$ > \"$0\"; exec sleep 30', 'PIDFILE']\n      timeout: 5";
+
+#[tokio::test]
+async fn a_newer_copy_kills_the_running_command() {
+    let pidfile = scratch("superseded.pid");
+    let engine = engine(SLEEPS, &pidfile);
+    let started = Instant::now();
+    let slow = tokio::spawn(engine.on_copy("slow"));
+    let pids = pids_written_to(&pidfile, 1).await;
+
+    // La copie récente est traitée sans attendre la lente.
+    assert_eq!(engine.on_copy("abc").await, Outcome::Write("ABC".into()));
+    assert_eq!(slow.await.unwrap(), Outcome::Cancelled);
+    assert!(started.elapsed() < PROMPTLY, "{:?}", started.elapsed());
+    assert!(
+        wait_dead(pids[0]).await,
+        "la commande de la copie dépassée vit encore"
+    );
+    std::fs::remove_file(&pidfile).unwrap();
+}
+
+#[tokio::test]
+async fn a_newer_copy_kills_the_processes_the_command_started() {
+    let pidfile = scratch("superseded-children.pid");
+    let engine = engine(
+        "    - command: [sh, -c, 'echo $$ > \"$0\"; sleep 30 & echo $! >> \"$0\"; wait', 'PIDFILE']\n      timeout: 5",
+        &pidfile,
+    );
+    let started = Instant::now();
+    let slow = tokio::spawn(engine.on_copy("slow"));
+    let pids = pids_written_to(&pidfile, 2).await;
+
+    engine.on_copy("abc").await;
+    assert_eq!(slow.await.unwrap(), Outcome::Cancelled);
+    // Avant le délai (5 s), qui tuerait aussi le groupe : c'est l'annulation.
+    assert!(started.elapsed() < PROMPTLY, "{:?}", started.elapsed());
+    for pid in pids {
+        assert!(wait_dead(pid).await, "le processus {pid} vit encore");
+    }
+    std::fs::remove_file(&pidfile).unwrap();
+}
+
+#[tokio::test]
+async fn a_cancelled_pipeline_never_starts_its_next_step() {
+    let pidfile = scratch("next-step.pid");
+    let marker = scratch("next-step-ran");
+    // La première étape finirait seule après une demi-seconde.
+    let engine = engine(
+        &format!(
+            "    - command: [sh, -c, 'echo $$ > \"$0\"; sleep 0.5; cat', 'PIDFILE']\n    - command: [touch, '{}']",
+            marker.display()
+        ),
+        &pidfile,
+    );
+    let slow = tokio::spawn(engine.on_copy("slow"));
+    pids_written_to(&pidfile, 1).await;
+
+    engine.on_copy("abc").await;
+    assert_eq!(slow.await.unwrap(), Outcome::Cancelled);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(!marker.exists(), "l'étape suivante a tourné");
+    std::fs::remove_file(&pidfile).unwrap();
+}
+
+#[tokio::test]
+async fn a_copy_without_text_cancels_the_copy_in_progress() {
+    let pidfile = scratch("non-text.pid");
+    let engine = engine(SLEEPS, &pidfile);
+    let started = Instant::now();
+    let slow = tokio::spawn(engine.on_copy("slow"));
+    let pids = pids_written_to(&pidfile, 1).await;
+
+    // Une image copiée juste après : rien à écrire, mais la copie en cours s'arrête.
+    engine.on_copy_without_text();
+    assert_eq!(slow.await.unwrap(), Outcome::Cancelled);
+    assert!(started.elapsed() < PROMPTLY, "{:?}", started.elapsed());
+    assert!(
+        wait_dead(pids[0]).await,
+        "la commande de la copie annulée vit encore"
+    );
+    std::fs::remove_file(&pidfile).unwrap();
 }

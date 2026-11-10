@@ -14,19 +14,12 @@ use std::time::Duration;
 
 use crate::config::yaml::Value;
 
-/// Futur rendu par [`Transformation::apply`].
-///
-/// Seam de test temporaire, public seulement pour que les tests branchent une
-/// étape lente ; à retirer par le ticket #8, une vraie étape `command` (`sleep`)
-/// pouvant désormais jouer ce rôle.
-pub type StepFuture<'a> = Pin<Box<dyn Future<Output = Result<String, StepError>> + Send + 'a>>;
+/// Futur rendu par [`Transformation::apply`]. L'abandonner arrête l'étape.
+pub(crate) type StepFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<String, StepError>> + Send + 'a>>;
 
 /// Opération qui prend un texte et rend un texte.
-///
-/// Seam de test temporaire, public seulement pour que les tests branchent une
-/// étape lente ; à retirer par le ticket #8, une vraie étape `command` (`sleep`)
-/// pouvant désormais jouer ce rôle.
-pub trait Transformation: Send + Sync {
+pub(crate) trait Transformation: Send + Sync {
     /// Nom tel qu'il apparaît dans la config et dans les échecs.
     fn name(&self) -> &str;
 
@@ -34,15 +27,11 @@ pub trait Transformation: Send + Sync {
 }
 
 /// Pourquoi une étape a échoué.
-///
-/// Seam de test temporaire, public seulement pour que les tests branchent une
-/// étape lente ; à retirer par le ticket #8, une vraie étape `command` (`sleep`)
-/// pouvant désormais jouer ce rôle.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct StepError {
-    pub message: String,
+pub(crate) struct StepError {
+    pub(crate) message: String,
     /// Sortie d'erreur de l'étape, vide si elle n'en a pas.
-    pub stderr: String,
+    pub(crate) stderr: String,
 }
 
 /// Pourquoi une étape de la config n'a pas pu être construite.

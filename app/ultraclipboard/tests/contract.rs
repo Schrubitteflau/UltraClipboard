@@ -2,12 +2,11 @@
 
 mod common;
 
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use common::{Extension, PrivateBus, upper_everything};
-use engine::{Config, Engine, Pipeline, StepFuture, Transformation};
-use tokio::sync::Semaphore;
+use engine::{Config, Engine};
 use ultraclipboard::{ServeError, serve};
 
 const SOON: Duration = Duration::from_secs(5);
@@ -36,42 +35,84 @@ async fn a_second_instance_is_refused() {
     assert!(matches!(err, ServeError::AlreadyRunning), "{err:?}");
 }
 
-/// Met en majuscules ; bloque sur « slow » jusqu'à ce que le test ouvre la barrière.
-struct GatedUpper(Arc<Semaphore>);
+/// « slow » passe par la commande `script` (texte en entrée, résultat en
+/// sortie) ; toute autre copie est mise en majuscules aussitôt.
+fn slow_engine(script: &str) -> Engine {
+    let yaml = format!(
+        "config_version: 1\npipelines:\n  slow:\n    - command: [sh, -c, '{script}']\n      timeout: 5\n  shout: [upper]\nrules:\n  - match: '^slow$'\n    pipeline: slow\n  - match: ''\n    pipeline: shout\n"
+    );
+    Engine::new(Config::parse(&yaml).unwrap())
+}
 
-impl Transformation for GatedUpper {
-    fn name(&self) -> &str {
-        "gated-upper"
-    }
+/// Marqueur que la commande lente crée si elle va au bout ; absent au départ.
+fn marker(name: &str) -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("contract");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    let _ = std::fs::remove_file(&path);
+    path
+}
 
-    fn apply<'a>(&'a self, input: &'a str) -> StepFuture<'a> {
-        Box::pin(async move {
-            if input == "slow" {
-                let _permit = self.0.acquire().await.unwrap();
-            }
-            Ok(input.to_uppercase())
-        })
-    }
+/// Commande qui, après une demi-seconde, crée `marker` puis rend le texte en
+/// majuscules : sans annulation, le marqueur apparaît et « SLOW » est appliqué.
+fn finishes_late(marker: &Path) -> String {
+    format!("sleep 0.5; touch \"{}\"; tr a-z A-Z", marker.display())
 }
 
 #[tokio::test]
 async fn copied_is_accepted_while_a_slow_copy_is_in_progress() {
     let bus = PrivateBus::start();
     let app = bus.connect().await;
-    let gate = Arc::new(Semaphore::new(0));
-    let engine = Engine::with_pipeline(Pipeline::new(vec![Box::new(GatedUpper(gate.clone()))]));
-    serve(&app, engine).await.unwrap();
+    serve(&app, slow_engine("sleep 30")).await.unwrap();
 
+    // Bien en deçà du délai de la commande (5 s).
+    let prompt = Duration::from_secs(2);
     let mut extension = Extension::connect(&bus).await;
-    tokio::time::timeout(SOON, extension.copied("slow"))
+    tokio::time::timeout(prompt, extension.copied("slow"))
         .await
         .expect("Copied a attendu la fin du traitement");
-    tokio::time::timeout(SOON, extension.copied("abc"))
+    tokio::time::timeout(prompt, extension.copied("abc"))
         .await
         .expect("Copied a attendu la fin du traitement précédent");
-    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("ABC"));
+    assert_eq!(extension.next_apply(prompt).await.as_deref(), Some("ABC"));
+}
 
-    // Le résultat de la copie lente, devenu périmé, n'est jamais appliqué.
-    gate.add_permits(1);
-    assert_eq!(extension.next_apply(Duration::from_millis(300)).await, None);
+#[tokio::test]
+async fn two_quick_copies_apply_only_the_second_and_stop_the_first() {
+    let marker = marker("two-quick-copies");
+    let bus = PrivateBus::start();
+    let app = bus.connect().await;
+    serve(&app, slow_engine(&finishes_late(&marker)))
+        .await
+        .unwrap();
+
+    let mut extension = Extension::connect(&bus).await;
+    extension.copied("slow").await;
+    extension.copied("abc").await;
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("ABC"));
+    assert_eq!(extension.next_apply(Duration::from_secs(1)).await, None);
+    assert!(
+        !marker.exists(),
+        "la commande de la première copie a continué"
+    );
+}
+
+#[tokio::test]
+async fn a_copy_without_text_stops_the_copy_in_progress() {
+    let marker = marker("copy-without-text");
+    let bus = PrivateBus::start();
+    let app = bus.connect().await;
+    serve(&app, slow_engine(&finishes_late(&marker)))
+        .await
+        .unwrap();
+
+    let mut extension = Extension::connect(&bus).await;
+    extension.copied("slow").await;
+    // Une image copiée juste après : le résultat tardif ne doit pas la remplacer.
+    extension.copied_non_text().await;
+    assert_eq!(extension.next_apply(Duration::from_secs(1)).await, None);
+    assert!(
+        !marker.exists(),
+        "la commande de la copie annulée a continué"
+    );
 }
