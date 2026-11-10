@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Installe UltraClipboard pour l'utilisateur courant (Ubuntu 26.04, GNOME, Wayland) :
-# appli Tauri dans ~/.local/bin, extension GNOME liée vers ce dépôt, service systemd utilisateur.
+# appli Tauri dans ~/.local/bin, extension GNOME liée vers ce dépôt (schéma des raccourcis compilé),
+# service systemd utilisateur.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -26,6 +27,7 @@ bun install --frozen-lockfile --cwd "$ROOT/app/ui"
 install -Dm755 "${CARGO_TARGET_DIR:-$ROOT/app/target}/release/ultraclipboard" "$HOME/.local/bin/ultraclipboard"
 
 echo "==> Extension GNOME Shell"
+glib-compile-schemas --strict "$ROOT/extension/schemas"
 mkdir -p "$(dirname "$EXT_LINK")"
 ln -sfn "$ROOT/extension" "$EXT_LINK"
 if ! gnome-extensions enable "$UUID" 2>/dev/null; then

@@ -1,7 +1,8 @@
 {
   "uuid": "ultraclipboard@grochonnou",
   "name": "UltraClipboard",
-  "description": "Capteur du presse-papier pour l'appli UltraClipboard : signale chaque copie et écrit les résultats transformés.",
+  "description": "Capteur du presse-papier pour l'appli UltraClipboard : signale chaque copie, écrit les résultats transformés et porte les raccourcis (restaurer l'Original, réappliquer).",
   "shell-version": ["50"],
+  "settings-schema": "org.gnome.shell.extensions.ultraclipboard",
   "url": ""
 }
