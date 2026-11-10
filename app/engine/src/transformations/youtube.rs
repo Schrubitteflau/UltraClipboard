@@ -180,7 +180,8 @@ impl Youtube {
         if err.is_timeout() {
             self.timed_out()
         } else {
-            failure(format!("oEmbed injoignable : {err}"))
+            // Sans l'adresse de la requête : elle porte l'URL copiée.
+            failure(format!("oEmbed injoignable : {}", err.without_url()))
         }
     }
 
@@ -189,7 +190,10 @@ impl Youtube {
         if err.is_timeout() {
             self.timed_out()
         } else {
-            failure(format!("réponse oEmbed interrompue : {err}"))
+            failure(format!(
+                "réponse oEmbed interrompue : {}",
+                err.without_url()
+            ))
         }
     }
 
