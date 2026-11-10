@@ -354,6 +354,22 @@ impl Engine {
         }
     }
 
+    /// Restaure l'Original : rend le texte à écrire pour annuler la dernière
+    /// Transformation appliquée. Sans Original : rien n'est écrit (`None`).
+    ///
+    /// Le texte rendu compte comme notre écriture : son écho est ignoré une
+    /// fois, il n'est pas retransformé, même s'il revient après l'écho du
+    /// résultat ou d'une autre restauration. Restaurer de nouveau le réécrit.
+    ///
+    /// La dernière copie gagne : l'Original ne remplace jamais une copie plus
+    /// récente que la Transformation, et rien n'est écrit. Une copie en cours
+    /// de traitement (qu'il y ait un Original ou non) s'arrête, son issue est
+    /// [`Outcome::Cancelled`], et elle reste telle que copiée. Ni historique ni
+    /// notification : seule une copie y entre.
+    pub fn restore_original(&self) -> Option<String> {
+        self.state.lock().unwrap().restore()
+    }
+
     /// Les dernières transformations ([`HISTORY_CAP`] au plus), la plus récente
     /// en tête : une entrée par copie qui a déclenché un Pipeline. En mémoire
     /// seulement ; conservé quand la config change.
@@ -386,7 +402,7 @@ fn settle(
         Ok(output) if output == text => Outcome::Nothing(Skip::Unchanged),
         Ok(output) if output.is_empty() => Outcome::Nothing(Skip::EmptyResult),
         Ok(output) => {
-            state.wrote(&output);
+            state.transformed(ticket, text, &output);
             Outcome::Write(output)
         }
     }

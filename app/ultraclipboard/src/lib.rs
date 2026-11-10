@@ -4,7 +4,9 @@
 //! L'extension GNOME Shell appelle `Copied(text)` à chaque copie de texte, et
 //! `CopiedNonText()` à chaque copie sans texte (image, fichiers…) ; quand un
 //! résultat est prêt, le service émet le signal `Apply(text)` et l'extension
-//! l'écrit dans le presse-papier. Toute copie, texte ou non, arrête le
+//! l'écrit dans le presse-papier. `RestoreOriginal()` (raccourci de
+//! l'extension) annule la dernière Transformation par un `Apply` de
+//! l'Original. Toute copie, texte ou non, arrête le
 //! traitement de la précédente.
 
 mod app;
@@ -106,6 +108,18 @@ impl Service {
     /// remplace jamais ce qui vient d'être copié.
     fn copied_non_text(&self) {
         self.engine.on_copy_without_text();
+    }
+
+    /// Restaure l'Original (raccourci de l'extension) : `Apply` avec le texte
+    /// d'avant la dernière Transformation appliquée. Sans Original, ou si une
+    /// copie a été faite depuis : rien n'est écrit, et la copie en cours de
+    /// traitement, s'il y en a une, s'arrête et reste telle que copiée.
+    async fn restore_original(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
+        if let Some(original) = self.engine.restore_original()
+            && let Err(err) = Self::apply(&emitter, &original).await
+        {
+            eprintln!("ultraclipboard: échec d'émission de Apply : {err}");
+        }
     }
 
     /// Demande à l'extension d'écrire ce texte dans le presse-papier.

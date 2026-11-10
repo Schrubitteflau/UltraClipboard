@@ -124,6 +124,20 @@ impl Extension {
             .unwrap();
     }
 
+    /// Demande la restauration de l'Original (raccourci clavier).
+    pub async fn restore_original(&self) {
+        self.conn
+            .call_method(
+                Some(BUS_NAME),
+                OBJECT_PATH,
+                Some(INTERFACE),
+                "RestoreOriginal",
+                &(),
+            )
+            .await
+            .unwrap();
+    }
+
     /// Prochain texte reçu par `Apply`, ou `None` s'il n'en vient aucun dans le délai.
     pub async fn next_apply(&mut self, within: Duration) -> Option<String> {
         let msg = tokio::time::timeout(within, self.applies.next())

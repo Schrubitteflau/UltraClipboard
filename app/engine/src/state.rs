@@ -1,6 +1,13 @@
 //! État partagé du moteur entre les copies.
 
+use std::collections::VecDeque;
+
 use tokio::sync::watch;
+
+/// Nombre d'écritures dont on attend encore l'écho, au plus : de quoi couvrir
+/// un résultat et deux restaurations faites avant son retour. Au-delà, la plus
+/// ancienne est oubliée.
+const PENDING_ECHOES: usize = 4;
 
 /// Numéro d'ordre d'une copie acceptée.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -15,10 +22,14 @@ pub(crate) enum Registration {
 
 #[derive(Debug)]
 pub(crate) struct State {
-    /// Dernier texte écrit par UltraClipboard, retenu jusqu'à ce que son écho
-    /// revienne ou qu'une écriture plus récente le remplace : sa copie en retour
-    /// ne doit pas être retraitée.
-    last_output: Option<String>,
+    /// Textes écrits par UltraClipboard dont l'écho n'est pas encore revenu,
+    /// du plus ancien au plus récent ([`PENDING_ECHOES`] au plus), avec le
+    /// numéro de la dernière copie au moment de l'écriture : leur copie en
+    /// retour ne doit pas être retraitée. Chacun est ignoré une fois.
+    pending_echoes: VecDeque<(Ticket, String)>,
+    /// Original de la dernière Transformation appliquée, avec le numéro de la
+    /// copie qu'elle a transformée.
+    original: Option<(Ticket, String)>,
     /// Numéro de la dernière copie acceptée, diffusé aux copies en cours.
     latest: watch::Sender<u64>,
 }
@@ -26,7 +37,8 @@ pub(crate) struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            last_output: None,
+            pending_echoes: VecDeque::new(),
+            original: None,
             latest: watch::Sender::new(0),
         }
     }
@@ -37,10 +49,15 @@ impl State {
     ///
     /// L'écho de notre écriture est ignoré une fois et ne compte pas comme une
     /// nouvelle copie : il n'annule pas une copie en cours. Une copie sans rapport
-    /// n'efface pas l'écriture retenue, dont l'écho peut encore arriver après elle.
+    /// n'efface pas les écritures retenues, dont l'écho peut encore arriver après
+    /// elle ; une écriture plus récente faite sans nouvelle copie non plus
+    /// (restauration faite avant le retour de l'écho du résultat). Si les deux
+    /// lectures de l'extension voient le texte restauré (deux échos
+    /// identiques), le second est traité comme une copie : rare, et on ne peut
+    /// pas le distinguer d'une vraie copie.
     pub(crate) fn register(&mut self, text: &str) -> Registration {
-        if self.last_output.as_deref() == Some(text) {
-            self.last_output = None;
+        if let Some(echo) = self.pending_echoes.iter().position(|(_, w)| w == text) {
+            self.pending_echoes.remove(echo);
             return Registration::OwnWrite;
         }
         let ticket = self.supersede();
@@ -70,9 +87,46 @@ impl State {
         ticket.0 == *self.latest.borrow()
     }
 
-    /// Retient ce qu'on écrit, pour reconnaître son écho.
-    pub(crate) fn wrote(&mut self, text: &str) {
-        self.last_output = Some(text.to_owned());
+    /// La copie `ticket` (texte `original`) est transformée en `output`, qu'on
+    /// écrit : retient son écho à ignorer et l'Original à restaurer.
+    pub(crate) fn transformed(&mut self, ticket: Ticket, original: &str, output: &str) {
+        self.wrote(output);
+        self.original = Some((ticket, original.to_owned()));
+    }
+
+    /// Texte à écrire pour annuler la dernière Transformation appliquée, retenu
+    /// comme notre écriture (son écho est ignoré).
+    ///
+    /// La dernière copie gagne : si une copie a été faite depuis cette
+    /// Transformation (ou sans Original), rien n'est écrit, et la copie en
+    /// cours de traitement, s'il y en a une, s'arrête et reste telle que copiée.
+    pub(crate) fn restore(&mut self) -> Option<String> {
+        let original = match &self.original {
+            Some((ticket, original)) if self.is_current(*ticket) => original.clone(),
+            _ => {
+                // Arrête le traitement de la copie plus récente, s'il tourne encore.
+                self.supersede();
+                return None;
+            }
+        };
+        self.wrote(&original);
+        Some(original)
+    }
+
+    /// Retient une écriture, pour reconnaître son écho.
+    ///
+    /// Les écritures faites avant une copie plus récente sont oubliées : leur
+    /// écho, s'il n'est pas revenu jusqu'ici, est perdu (l'extension a lu la
+    /// copie suivante à sa place), et une vraie copie du même texte ne doit pas
+    /// être ignorée plus tard.
+    fn wrote(&mut self, text: &str) {
+        let latest = *self.latest.borrow();
+        self.pending_echoes.retain(|(at, _)| at.0 == latest);
+        if self.pending_echoes.len() == PENDING_ECHOES {
+            self.pending_echoes.pop_front();
+        }
+        self.pending_echoes
+            .push_back((Ticket(latest), text.to_owned()));
     }
 }
 
