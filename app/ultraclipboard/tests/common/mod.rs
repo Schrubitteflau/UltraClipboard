@@ -138,6 +138,34 @@ impl Extension {
             .unwrap();
     }
 
+    /// Réapplique les Règles au texte du presse-papier (raccourci clavier).
+    pub async fn reapply(&self, text: &str) {
+        self.conn
+            .call_method(
+                Some(BUS_NAME),
+                OBJECT_PATH,
+                Some(INTERFACE),
+                "Reapply",
+                &(text,),
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Met en pause ou reprend (menu de l'icône).
+    pub async fn set_paused(&self, paused: bool) {
+        self.conn
+            .call_method(
+                Some(BUS_NAME),
+                OBJECT_PATH,
+                Some(INTERFACE),
+                "SetPaused",
+                &(paused,),
+            )
+            .await
+            .unwrap();
+    }
+
     /// Prochain texte reçu par `Apply`, ou `None` s'il n'en vient aucun dans le délai.
     pub async fn next_apply(&mut self, within: Duration) -> Option<String> {
         let msg = tokio::time::timeout(within, self.applies.next())
