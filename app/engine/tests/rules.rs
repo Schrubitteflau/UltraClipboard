@@ -1,6 +1,6 @@
 //! Choix de la Règle et exécution de son Pipeline, à partir d'une config YAML.
 
-use engine::{Config, Engine, Outcome, Skip};
+use engine::{Config, Endpoints, Engine, Outcome, Skip};
 
 fn engine(yaml: &str) -> Engine {
     Engine::new(Config::parse(yaml).expect("config valide"))
@@ -106,8 +106,14 @@ rules:
 
 #[tokio::test]
 async fn a_failing_step_discards_the_earlier_steps_result() {
-    // `youtube` échoue tant que le ticket #7 n'est pas livré.
-    let engine = engine(
+    // `youtube` échoue : son service oEmbed est un port local où personne n'écoute.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let oembed = format!("http://127.0.0.1:{port}/oembed");
+    let config = Config::parse_with(
         r#"
 config_version: 1
 pipelines:
@@ -116,7 +122,9 @@ rules:
   - match: ''
     pipeline: p
 "#,
+        &Endpoints { oembed },
     );
+    let engine = Engine::new(config.expect("config valide"));
     match engine.on_copy("abc").await {
         Outcome::Failed(failure) => assert_eq!(failure.step, "youtube"),
         other => panic!("attendu un échec de youtube, obtenu {other:?}"),

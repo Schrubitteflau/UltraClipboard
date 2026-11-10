@@ -15,7 +15,7 @@ use std::time::Duration;
 use regex::Regex;
 
 use crate::pipeline::Pipeline;
-use crate::transformations::{self, BuildError, Transformation};
+use crate::transformations::{self, BuildError, Endpoints, Transformation};
 use yaml::Value;
 
 /// Fichier d'exemple créé au premier lancement quand la config n'existe pas.
@@ -91,8 +91,14 @@ fn error(field: impl Into<String>, reason: impl Into<String>) -> ConfigError {
 }
 
 impl Config {
-    /// Lit et valide une config YAML.
+    /// Lit et valide une config YAML ; les services en ligne sont les vrais.
     pub fn parse(yaml: &str) -> Result<Self, ConfigError> {
+        Self::parse_with(yaml, &Endpoints::default())
+    }
+
+    /// Lit et valide une config YAML dont les Transformations appellent ces
+    /// services (les tests y mettent un faux service local).
+    pub fn parse_with(yaml: &str, endpoints: &Endpoints) -> Result<Self, ConfigError> {
         let root: Value = serde_saphyr::from_str(yaml)
             .map_err(|err| error("", format!("YAML invalide : {err}")))?;
         let root = match root {
@@ -113,7 +119,7 @@ impl Config {
             }
         }
         let notifications = parse_notifications(field(&root, "notifications"))?;
-        let pipelines = parse_pipelines(field(&root, "pipelines"))?;
+        let pipelines = parse_pipelines(field(&root, "pipelines"), endpoints)?;
         let rules = parse_rules(field(&root, "rules"), &pipelines)?;
         Ok(Self {
             notifications,
@@ -198,7 +204,10 @@ fn parse_notifications(value: Option<&Value>) -> Result<Notifications, ConfigErr
     }
 }
 
-fn parse_pipelines(value: Option<&Value>) -> Result<HashMap<String, Arc<Pipeline>>, ConfigError> {
+fn parse_pipelines(
+    value: Option<&Value>,
+    endpoints: &Endpoints,
+) -> Result<HashMap<String, Arc<Pipeline>>, ConfigError> {
     let entries = match value {
         None | Some(Value::Null) => return Ok(HashMap::new()),
         Some(Value::Map(entries)) => entries,
@@ -230,7 +239,7 @@ fn parse_pipelines(value: Option<&Value>) -> Result<HashMap<String, Arc<Pipeline
         let steps = steps
             .iter()
             .enumerate()
-            .map(|(i, step)| parse_step(&format!("{path}[{i}]"), step))
+            .map(|(i, step)| parse_step(&format!("{path}[{i}]"), step, endpoints))
             .collect::<Result<Vec<_>, _>>()?;
         pipelines.insert(name.clone(), Arc::new(Pipeline::new(steps)));
     }
@@ -238,7 +247,11 @@ fn parse_pipelines(value: Option<&Value>) -> Result<HashMap<String, Arc<Pipeline
 }
 
 /// Une étape : `nom`, ou `nom: paramètres` avec un `timeout` facultatif à côté.
-fn parse_step(path: &str, step: &Value) -> Result<Box<dyn Transformation>, ConfigError> {
+fn parse_step(
+    path: &str,
+    step: &Value,
+    endpoints: &Endpoints,
+) -> Result<Box<dyn Transformation>, ConfigError> {
     let (name, params, timeout) = match step {
         Value::Str(name) => (name.as_str(), &Value::Null, None),
         Value::Map(entries) => {
@@ -271,7 +284,7 @@ fn parse_step(path: &str, step: &Value) -> Result<Box<dyn Transformation>, Confi
             ));
         }
     };
-    transformations::build(name, params, timeout).map_err(|err| match err {
+    transformations::build(name, params, timeout, endpoints).map_err(|err| match err {
         BuildError::Unknown => error(path, format!("Transformation inconnue « {name} »")),
         BuildError::Params { field, reason } => {
             let mut at = format!("{path}.{name}");
