@@ -10,7 +10,7 @@ use engine::{Config, Engine};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager, WindowEvent};
-use ultraclipboard::{BUS_NAME, ServeError, config_path, serve, startup_config};
+use ultraclipboard::{BUS_NAME, ConfigFollower, ServeError, config_path, follow_config, serve};
 
 const MAIN_WINDOW: &str = "main";
 const MENU_OPEN: &str = "open";
@@ -19,8 +19,8 @@ const MENU_QUIT: &str = "quit";
 fn main() -> ExitCode {
     // Un seul runtime, partagé par le service D-Bus, le moteur et Tauri.
     let runtime = tokio::runtime::Runtime::new().expect("runtime tokio");
-    let conn = match runtime.block_on(start_service()) {
-        Ok(conn) => conn,
+    let (conn, _follower) = match runtime.block_on(start_service()) {
+        Ok(started) => started,
         Err(err) => {
             eprintln!("ultraclipboard: {err}");
             return ExitCode::FAILURE;
@@ -48,17 +48,20 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-async fn start_service() -> Result<zbus::Connection, ServeError> {
-    let config = match config_path() {
-        Some(path) => startup_config(&path),
+/// Charge la config (puis la suit à chaque enregistrement) et expose le moteur sur
+/// le bus de session. Le suivi s'arrête quand on lâche le [`ConfigFollower`].
+async fn start_service() -> Result<(zbus::Connection, Option<ConfigFollower>), ServeError> {
+    let engine = Engine::new(Config::default());
+    let follower = match config_path() {
+        Some(path) => Some(follow_config(path, engine.clone())),
         None => {
             eprintln!("ultraclipboard: ni XDG_CONFIG_HOME ni HOME, aucune Règle active");
-            Config::default()
+            None
         }
     };
     let conn = zbus::connection::Builder::session().build().await?;
-    serve(&conn, Engine::new(config)).await?;
-    Ok(conn)
+    serve(&conn, engine).await?;
+    Ok((conn, follower))
 }
 
 /// Icône AppIndicator. Sous Linux le clic sur l'icône n'émet rien : tout passe par le menu.

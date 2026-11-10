@@ -13,7 +13,7 @@ use engine::{Engine, Outcome};
 use zbus::fdo::{RequestNameFlags, RequestNameReply};
 use zbus::{Connection, interface, object_server::SignalEmitter};
 
-pub use config::{config_path, startup_config};
+pub use config::{ConfigFollower, config_path, follow_config};
 
 pub const BUS_NAME: &str = "org.ultraclipboard.UltraClipboard";
 pub const OBJECT_PATH: &str = "/org/ultraclipboard/UltraClipboard";

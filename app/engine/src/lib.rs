@@ -4,7 +4,8 @@
 //! et applique l'[`Outcome`] qu'il rend.
 //!
 //! Ce que fait le moteur est décrit par une [`Config`] : la première Règle dont le
-//! motif correspond à la copie applique son Pipeline.
+//! motif correspond à la copie applique son Pipeline. La config active peut être
+//! remplacée à tout moment ([`Engine::load`]) sans perdre l'état du moteur.
 
 mod config;
 mod pipeline;
@@ -12,7 +13,7 @@ mod state;
 mod transformations;
 
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 pub use config::{Config, ConfigError, Notifications, Rule, SAMPLE_CONFIG};
 pub use pipeline::{Failure, Pipeline};
@@ -49,8 +50,14 @@ pub enum Skip {
 /// Réagit aux copies. Bon marché à cloner : les clones partagent le même état.
 #[derive(Clone)]
 pub struct Engine {
-    config: Arc<Config>,
+    config: Arc<RwLock<Loaded>>,
     state: Arc<Mutex<State>>,
+}
+
+/// Config active et refus du dernier chargement, s'il a échoué.
+struct Loaded {
+    active: Arc<Config>,
+    error: Option<ConfigError>,
 }
 
 impl Engine {
@@ -58,9 +65,50 @@ impl Engine {
     /// copie transformée.
     pub fn new(config: Config) -> Self {
         Self {
-            config: Arc::new(config),
+            config: Arc::new(RwLock::new(Loaded {
+                active: Arc::new(config),
+                error: None,
+            })),
             state: Arc::default(),
         }
+    }
+
+    /// Charge une config YAML et la rend active pour les copies suivantes.
+    ///
+    /// Une copie déjà en cours finit avec le Pipeline qu'elle avait choisi. L'état
+    /// du moteur (anti-boucle, copie en cours) n'est pas touché. Config refusée :
+    /// l'active reste en place et l'erreur est retenue ([`Engine::config_error`]).
+    pub fn load(&self, yaml: &str) -> Result<(), ConfigError> {
+        let parsed = Config::parse(yaml);
+        let mut loaded = self.config.write().unwrap();
+        match parsed {
+            Ok(config) => {
+                loaded.active = Arc::new(config);
+                loaded.error = None;
+                Ok(())
+            }
+            Err(err) => {
+                loaded.error = Some(err.clone());
+                Err(err)
+            }
+        }
+    }
+
+    /// La config n'a pas pu être lue (fichier illisible…) : l'active reste en
+    /// place et cette erreur est retenue comme celle d'un chargement refusé.
+    pub fn reject_config(&self, error: ConfigError) {
+        self.config.write().unwrap().error = Some(error);
+    }
+
+    /// Config active.
+    pub fn config(&self) -> Arc<Config> {
+        Arc::clone(&self.config.read().unwrap().active)
+    }
+
+    /// Pourquoi le dernier chargement a été refusé ; `None` s'il a réussi (ou s'il
+    /// n'y en a pas eu).
+    pub fn config_error(&self) -> Option<ConfigError> {
+        self.config.read().unwrap().error.clone()
     }
 
     /// Moteur qui applique ce Pipeline à toutes les copies.
@@ -82,7 +130,13 @@ impl Engine {
     pub fn on_copy(&self, text: &str) -> impl Future<Output = Outcome> + Send + use<> {
         // Toute copie (même sans Règle) est enregistrée : elle annule celle en cours.
         let registration = self.state.lock().unwrap().register(text);
-        let pipeline = self.config.rule_for(text).map(Rule::run);
+        let pipeline = self
+            .config
+            .read()
+            .unwrap()
+            .active
+            .rule_for(text)
+            .map(Rule::run);
         let state = Arc::clone(&self.state);
         let text = text.to_owned();
         async move {
