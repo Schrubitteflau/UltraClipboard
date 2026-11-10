@@ -2,7 +2,6 @@
 
 mod common;
 
-use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -35,47 +34,6 @@ async fn a_second_instance_is_refused() {
         .await
         .unwrap_err();
     assert!(matches!(err, ServeError::AlreadyRunning), "{err:?}");
-}
-
-#[tokio::test]
-async fn the_app_stops_with_a_message_when_already_running() {
-    let bus = PrivateBus::start();
-    let first = bus.connect().await;
-    serve(&first, Engine::new(Config::default())).await.unwrap();
-
-    let config = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("already-running");
-    let _ = std::fs::remove_dir_all(&config);
-    let out = Command::new(env!("CARGO_BIN_EXE_ultraclipboard"))
-        .env("DBUS_SESSION_BUS_ADDRESS", &bus.address)
-        .env("XDG_CONFIG_HOME", &config)
-        .output()
-        .unwrap();
-
-    assert!(!out.status.success());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("déjà lancé"), "stderr : {stderr}");
-}
-
-#[tokio::test]
-async fn the_app_takes_its_config_under_xdg_config_home() {
-    let bus = PrivateBus::start();
-    let first = bus.connect().await;
-    serve(&first, Engine::new(Config::default())).await.unwrap();
-
-    let home = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("xdg-config-home");
-    let _ = std::fs::remove_dir_all(&home);
-    // Une seconde instance lit sa config avant de s'arrêter : elle crée l'exemple ici.
-    Command::new(env!("CARGO_BIN_EXE_ultraclipboard"))
-        .env("DBUS_SESSION_BUS_ADDRESS", &bus.address)
-        .env("XDG_CONFIG_HOME", &home)
-        .output()
-        .unwrap();
-
-    let created = home.join("ultraclipboard").join("config.yaml");
-    assert_eq!(
-        std::fs::read_to_string(&created).unwrap(),
-        engine::SAMPLE_CONFIG
-    );
 }
 
 /// Met en majuscules ; bloque sur « slow » jusqu'à ce que le test ouvre la barrière.

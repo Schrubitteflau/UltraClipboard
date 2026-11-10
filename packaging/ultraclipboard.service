@@ -2,10 +2,14 @@
 Description=UltraClipboard — transformation automatique du presse-papier
 PartOf=graphical-session.target
 After=graphical-session.target
+# Pas de limite de redémarrages : au démarrage de session, l'affichage peut
+# ne pas être prêt ; l'appli réessaie jusqu'à ce qu'il le soit.
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=%h/.local/bin/ultraclipboard
 Restart=on-failure
+RestartSec=3
 
 [Install]
 WantedBy=graphical-session.target
