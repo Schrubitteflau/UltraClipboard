@@ -1,5 +1,5 @@
-//! Service D-Bus d'UltraClipboard, sans fenêtre : utilisé par le binaire, par les
-//! tests de contrat et, plus tard, par l'hôte Tauri.
+//! Service D-Bus d'UltraClipboard, sans fenêtre : utilisé par l'hôte Tauri
+//! (`app/desktop`, binaire `ultraclipboard`) et par les tests de contrat.
 //!
 //! L'extension GNOME Shell appelle `Copied(text)` à chaque copie ; quand un
 //! résultat est prêt, le service émet le signal `Apply(text)` et l'extension

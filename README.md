@@ -64,15 +64,28 @@ rules:                      # la première Règle qui correspond gagne
 - **Fenêtre en lecture seule** : Règles et Pipelines chargés, historique.
 - **Historique** : les 50 dernières transformations (Original, résultat, Pipeline, heure, succès/erreur), **en mémoire seulement**, perdu au redémarrage. Rien du presse-papier n'est écrit sur disque.
 
+## Installation
+
+Prérequis : [Rust](https://rustup.rs), [bun](https://bun.sh) et les bibliothèques système de Tauri :
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+Puis `./install.sh` (il vérifie ces prérequis avant de compiler).
+
 ## Architecture
 
 ```
 extension/   Extension GNOME Shell (GJS) : voit les copies, écrit le presse-papier,
              porte les raccourcis. Parle à l'appli par D-Bus.
-app/         Appli Tauri 2 : moteur Rust (Règles, Pipelines, Transformations,
-             historique) + fenêtre Svelte 5 / shadcn-svelte.
+app/         Appli Tauri 2 (un seul processus) :
+  engine/        moteur Rust (Règles, Pipelines, Transformations, historique) ;
+  ultraclipboard/ service D-Bus, sans fenêtre (testé sur un bus privé) ;
+  desktop/       hôte Tauri : icône, menu, fenêtre ; binaire `ultraclipboard` ;
+  ui/            fenêtre Svelte 5 / shadcn-svelte (Vite, bun).
 packaging/   Service systemd utilisateur.
-install.sh   Compile l'appli, installe l'extension en local, démarrage auto.
+install.sh   Compile la fenêtre et l'appli Tauri, installe l'extension en local, démarrage auto.
 ```
 
 ## Hors périmètre (pour l'instant)
