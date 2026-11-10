@@ -26,6 +26,23 @@ pub fn config_path() -> Option<PathBuf> {
     Some(base.join("ultraclipboard").join("config.yaml"))
 }
 
+/// Moteur de l'appli : aucune config chargée tant que le fichier n'est pas lu,
+/// puis il charge `path` et le suit ([`follow_config`]). Sans `path` (ni
+/// XDG_CONFIG_HOME ni HOME), il reste sans Règle.
+///
+/// À appeler dans un runtime tokio.
+pub fn start_engine(path: Option<PathBuf>) -> (Engine, Option<ConfigFollower>) {
+    let engine = Engine::default();
+    let follower = match path {
+        Some(path) => Some(follow_config(path, engine.clone())),
+        None => {
+            eprintln!("ultraclipboard: ni XDG_CONFIG_HOME ni HOME, aucune Règle active");
+            None
+        }
+    };
+    (engine, follower)
+}
+
 /// Délai sans nouvel évènement sur le fichier avant de le relire : un éditeur
 /// enregistre parfois en plusieurs temps (troncature puis écriture, renommage
 /// puis création), seul l'état final compte.
