@@ -4,6 +4,7 @@
 //! Transformation : en ajouter une, c'est un fichier et une ligne ici.
 
 mod case;
+mod command;
 mod trim;
 mod youtube;
 
@@ -16,13 +17,15 @@ use crate::config::yaml::Value;
 /// Futur rendu par [`Transformation::apply`].
 ///
 /// Seam de test temporaire, public seulement pour que les tests branchent une
-/// étape lente ; à retirer quand une vraie étape `command` (`sleep`) pourra jouer ce rôle.
+/// étape lente ; à retirer par le ticket #8, une vraie étape `command` (`sleep`)
+/// pouvant désormais jouer ce rôle.
 pub type StepFuture<'a> = Pin<Box<dyn Future<Output = Result<String, StepError>> + Send + 'a>>;
 
 /// Opération qui prend un texte et rend un texte.
 ///
 /// Seam de test temporaire, public seulement pour que les tests branchent une
-/// étape lente ; à retirer quand une vraie étape `command` (`sleep`) pourra jouer ce rôle.
+/// étape lente ; à retirer par le ticket #8, une vraie étape `command` (`sleep`)
+/// pouvant désormais jouer ce rôle.
 pub trait Transformation: Send + Sync {
     /// Nom tel qu'il apparaît dans la config et dans les échecs.
     fn name(&self) -> &str;
@@ -33,7 +36,8 @@ pub trait Transformation: Send + Sync {
 /// Pourquoi une étape a échoué.
 ///
 /// Seam de test temporaire, public seulement pour que les tests branchent une
-/// étape lente ; à retirer quand une vraie étape `command` (`sleep`) pourra jouer ce rôle.
+/// étape lente ; à retirer par le ticket #8, une vraie étape `command` (`sleep`)
+/// pouvant désormais jouer ce rôle.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StepError {
     pub message: String,
@@ -46,7 +50,7 @@ pub(crate) enum BuildError {
     /// Aucune Transformation ne porte ce nom.
     Unknown,
     /// Paramètres refusés ; `field` est relatif aux paramètres (vide : les
-    /// paramètres dans leur ensemble).
+    /// paramètres dans leur ensemble ; `[i]` : le i-ème élément d'une liste).
     Params { field: String, reason: String },
 }
 
@@ -70,6 +74,7 @@ pub(crate) fn build(
         "trim" => no_params(params).map(|()| Box::new(trim::Trim) as _),
         "upper" => no_params(params).map(|()| Box::new(case::Upper) as _),
         "lower" => no_params(params).map(|()| Box::new(case::Lower) as _),
+        "command" => command::build(params, timeout).map(|t| Box::new(t) as _),
         "youtube" => youtube::build(params, timeout).map(|t| Box::new(t) as _),
         _ => Err(BuildError::Unknown),
     }
