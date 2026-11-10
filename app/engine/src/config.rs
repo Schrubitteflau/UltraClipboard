@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use regex::Regex;
+use serde::Serialize;
 
 use crate::pipeline::Pipeline;
 use crate::transformations::{self, BuildError, Endpoints, Transformation};
@@ -26,6 +27,27 @@ pub const SAMPLE_CONFIG: &str = include_str!("config/sample.yaml");
 pub struct Config {
     notifications: Notifications,
     rules: Vec<Rule>,
+    pipelines: Vec<NamedPipeline>,
+}
+
+/// Un Pipeline de la config : son nom (une clé nombre est lue comme du texte) et
+/// ses étapes, dans l'ordre.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NamedPipeline {
+    pub name: String,
+    pub steps: Vec<Step>,
+}
+
+/// Une étape d'un Pipeline, pour l'afficher.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Step {
+    /// Nom de la Transformation.
+    pub transformation: String,
+    /// Paramètres puis `timeout`, sur une ligne en YAML en ligne (textes entre
+    /// guillemets, listes entre crochets) ; vide s'il n'y en a pas. Les textes
+    /// sont repris tels qu'écrits : seuls les caractères de contrôle et de
+    /// direction (bidi) sont échappés, en `\n`, `\t` ou `\u{…}`.
+    pub params: String,
 }
 
 /// Niveau de notification choisi dans la config.
@@ -63,7 +85,7 @@ impl Rule {
 }
 
 /// Config refusée : quel champ, et pourquoi.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ConfigError {
     /// Chemin du champ fautif (`rules[0].match`, `pipelines.clean[1]`…) ; vide
     /// quand c'est le document entier (YAML illisible).
@@ -119,17 +141,23 @@ impl Config {
             }
         }
         let notifications = parse_notifications(field(&root, "notifications"))?;
-        let pipelines = parse_pipelines(field(&root, "pipelines"), endpoints)?;
-        let rules = parse_rules(field(&root, "rules"), &pipelines)?;
+        let (pipelines, built) = parse_pipelines(field(&root, "pipelines"), endpoints)?;
+        let rules = parse_rules(field(&root, "rules"), &built)?;
         Ok(Self {
             notifications,
             rules,
+            pipelines,
         })
     }
 
     /// Règles, dans l'ordre du fichier.
     pub fn rules(&self) -> &[Rule] {
         &self.rules
+    }
+
+    /// Pipelines, dans l'ordre du fichier, qu'une Règle les utilise ou non.
+    pub fn pipelines(&self) -> &[NamedPipeline] {
+        &self.pipelines
     }
 
     pub fn notifications(&self) -> Notifications {
@@ -192,12 +220,12 @@ fn parse_notifications(value: Option<&Value>) -> Result<Notifications, ConfigErr
     }
 }
 
-fn parse_pipelines(
-    value: Option<&Value>,
-    endpoints: &Endpoints,
-) -> Result<HashMap<String, Arc<Pipeline>>, ConfigError> {
+/// Pipelines tels qu'écrits (dans l'ordre du fichier) et construits (par nom).
+type Pipelines = (Vec<NamedPipeline>, HashMap<String, Arc<Pipeline>>);
+
+fn parse_pipelines(value: Option<&Value>, endpoints: &Endpoints) -> Result<Pipelines, ConfigError> {
     let entries = match value {
-        None | Some(Value::Null) => return Ok(HashMap::new()),
+        None | Some(Value::Null) => return Ok(Default::default()),
         Some(Value::Map(entries)) => entries,
         Some(other) => {
             return Err(error(
@@ -209,9 +237,17 @@ fn parse_pipelines(
             ));
         }
     };
+    let mut written = Vec::new();
     let mut pipelines = HashMap::new();
     for (name, steps) in entries {
         let path = format!("pipelines.{name}");
+        // Le YAML refuse deux clés identiques, mais `1` et `"1"` diffèrent pour lui.
+        if pipelines.contains_key(name) {
+            return Err(error(
+                path,
+                "deux Pipelines portent le même nom (une clé nombre et une clé texte identiques)",
+            ));
+        }
         let steps = match steps {
             Value::Seq(steps) if !steps.is_empty() => steps,
             Value::Seq(_) | Value::Null => {
@@ -224,14 +260,20 @@ fn parse_pipelines(
                 ));
             }
         };
-        let steps = steps
+        let (steps, built): (Vec<_>, Vec<_>) = steps
             .iter()
             .enumerate()
             .map(|(i, step)| parse_step(&format!("{path}[{i}]"), step, endpoints))
-            .collect::<Result<Vec<_>, _>>()?;
-        pipelines.insert(name.clone(), Arc::new(Pipeline::new(steps)));
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .unzip();
+        written.push(NamedPipeline {
+            name: name.clone(),
+            steps,
+        });
+        pipelines.insert(name.clone(), Arc::new(Pipeline::new(built)));
     }
-    Ok(pipelines)
+    Ok((written, pipelines))
 }
 
 /// Une étape : `nom`, ou `nom: paramètres` avec un `timeout` facultatif à côté.
@@ -239,11 +281,13 @@ fn parse_step(
     path: &str,
     step: &Value,
     endpoints: &Endpoints,
-) -> Result<Box<dyn Transformation>, ConfigError> {
+) -> Result<(Step, Box<dyn Transformation>), ConfigError> {
+    let mut written_timeout = None;
     let (name, params, timeout) = match step {
         Value::Str(name) => (name.as_str(), &Value::Null, None),
         Value::Map(entries) => {
-            let timeout = field(entries, "timeout")
+            written_timeout = field(entries, "timeout");
+            let timeout = written_timeout
                 .map(|t| parse_timeout(&format!("{path}.timeout"), t))
                 .transpose()?;
             let named: Vec<_> = entries.iter().filter(|(key, _)| key != "timeout").collect();
@@ -272,18 +316,31 @@ fn parse_step(
             ));
         }
     };
-    transformations::build(name, params, timeout, endpoints).map_err(|err| match err {
-        BuildError::Unknown => error(path, format!("Transformation inconnue « {name} »")),
-        BuildError::Params { field, reason } => {
-            let mut at = format!("{path}.{name}");
-            if field.starts_with('[') {
-                at = format!("{at}{field}");
-            } else if !field.is_empty() {
-                at = format!("{at}.{field}");
+    let mut written = match params {
+        Value::Null => Vec::new(),
+        params => vec![params.inline()],
+    };
+    if let Some(timeout) = written_timeout {
+        written.push(format!("timeout: {}", timeout.inline()));
+    }
+    let written = Step {
+        transformation: name.to_owned(),
+        params: written.join(", "),
+    };
+    let built =
+        transformations::build(name, params, timeout, endpoints).map_err(|err| match err {
+            BuildError::Unknown => error(path, format!("Transformation inconnue « {name} »")),
+            BuildError::Params { field, reason } => {
+                let mut at = format!("{path}.{name}");
+                if field.starts_with('[') {
+                    at = format!("{at}{field}");
+                } else if !field.is_empty() {
+                    at = format!("{at}.{field}");
+                }
+                error(at, reason)
             }
-            error(at, reason)
-        }
-    })
+        })?;
+    Ok((written, built))
 }
 
 fn parse_timeout(path: &str, value: &Value) -> Result<Duration, ConfigError> {

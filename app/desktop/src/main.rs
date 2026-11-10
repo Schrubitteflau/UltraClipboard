@@ -6,20 +6,22 @@
 
 use std::process::ExitCode;
 
-use engine::{Config, Engine};
+use engine::{ConfigState, Engine};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{App, AppHandle, Manager, WindowEvent};
-use ultraclipboard::{BUS_NAME, ConfigFollower, ServeError, config_path, follow_config, serve};
+use tauri::{App, AppHandle, Emitter, Manager, State, WindowEvent};
+use ultraclipboard::{BUS_NAME, ConfigFollower, ServeError, serve, start_engine};
 
 const MAIN_WINDOW: &str = "main";
 const MENU_OPEN: &str = "open";
 const MENU_QUIT: &str = "quit";
+/// Événement poussé à la fenêtre à chaque chargement de config ; porte un [`ConfigState`].
+const CONFIG_CHANGED: &str = "config-changed";
 
 fn main() -> ExitCode {
     // Un seul runtime, partagé par le service D-Bus, le moteur et Tauri.
     let runtime = tokio::runtime::Runtime::new().expect("runtime tokio");
-    let (conn, _follower) = match runtime.block_on(start_service()) {
+    let (conn, engine, _follower) = match runtime.block_on(start_service()) {
         Ok(started) => started,
         Err(err) => {
             eprintln!("ultraclipboard: {err}");
@@ -32,8 +34,11 @@ fn main() -> ExitCode {
     tauri::Builder::default()
         // La connexion vit aussi longtemps que l'appli : le service avec elle.
         .manage(conn)
+        .manage(engine)
+        .invoke_handler(tauri::generate_handler![config_state, config_path])
         .setup(|app| {
             add_tray(app)?;
+            push_config_changes(app);
             Ok(())
         })
         // Fermer la fenêtre la cache ; seul « Quitter » arrête l'appli.
@@ -50,18 +55,35 @@ fn main() -> ExitCode {
 
 /// Charge la config (puis la suit à chaque enregistrement) et expose le moteur sur
 /// le bus de session. Le suivi s'arrête quand on lâche le [`ConfigFollower`].
-async fn start_service() -> Result<(zbus::Connection, Option<ConfigFollower>), ServeError> {
-    let engine = Engine::new(Config::default());
-    let follower = match config_path() {
-        Some(path) => Some(follow_config(path, engine.clone())),
-        None => {
-            eprintln!("ultraclipboard: ni XDG_CONFIG_HOME ni HOME, aucune Règle active");
-            None
-        }
-    };
+async fn start_service() -> Result<(zbus::Connection, Engine, Option<ConfigFollower>), ServeError> {
+    let (engine, follower) = start_engine(ultraclipboard::config_path());
     let conn = zbus::connection::Builder::session().build().await?;
-    serve(&conn, engine).await?;
-    Ok((conn, follower))
+    serve(&conn, engine.clone()).await?;
+    Ok((conn, engine, follower))
+}
+
+/// Ce qui est chargé (vue « Règles »).
+#[tauri::command]
+fn config_state(engine: State<'_, Engine>) -> ConfigState {
+    engine.config_state()
+}
+
+/// Chemin du fichier de config ; `None` sans XDG_CONFIG_HOME ni HOME.
+#[tauri::command]
+fn config_path() -> Option<String> {
+    ultraclipboard::config_path().map(|path| path.display().to_string())
+}
+
+/// Pousse [`CONFIG_CHANGED`] à la fenêtre à chaque chargement de config.
+fn push_config_changes(app: &App) {
+    let engine = app.state::<Engine>().inner().clone();
+    let mut changes = engine.config_changes();
+    let app = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        while changes.changed().await.is_ok() {
+            let _ = app.emit(CONFIG_CHANGED, engine.config_state());
+        }
+    });
 }
 
 /// Icône AppIndicator. Sous Linux le clic sur l'icône n'émet rien : tout passe par le menu.
