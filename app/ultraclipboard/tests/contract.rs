@@ -116,3 +116,134 @@ async fn a_copy_without_text_stops_the_copy_in_progress() {
         "la commande de la copie annulée a continué"
     );
 }
+
+#[tokio::test]
+async fn restore_original_applies_the_text_before_the_transformation() {
+    let bus = PrivateBus::start();
+    let app = bus.connect().await;
+    serve(&app, upper_everything()).await.unwrap();
+
+    let mut extension = Extension::connect(&bus).await;
+    extension.copied("abc").await;
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("ABC"));
+    // L'extension écrit « ABC » : son écho revient comme copie.
+    extension.copied("ABC").await;
+    extension.restore_original().await;
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("abc"));
+    // L'écho de l'Original restauré n'est pas retransformé.
+    extension.copied("abc").await;
+    assert_eq!(extension.next_apply(Duration::from_secs(1)).await, None);
+}
+
+#[tokio::test]
+async fn restore_original_without_any_transformation_applies_nothing() {
+    let bus = PrivateBus::start();
+    let app = bus.connect().await;
+    serve(&app, upper_everything()).await.unwrap();
+
+    let mut extension = Extension::connect(&bus).await;
+    extension.restore_original().await;
+    assert_eq!(extension.next_apply(Duration::from_secs(1)).await, None);
+}
+
+#[tokio::test]
+async fn restore_original_stops_a_newer_copy_in_progress_and_applies_nothing() {
+    let marker = marker("restore-in-progress");
+    let bus = PrivateBus::start();
+    let app = bus.connect().await;
+    serve(&app, slow_engine(&finishes_late(&marker)))
+        .await
+        .unwrap();
+
+    let mut extension = Extension::connect(&bus).await;
+    extension.copied("abc").await;
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("ABC"));
+    extension.copied("ABC").await;
+    extension.copied("slow").await;
+    // « slow » reste tel que copié : ni « abc » ni « SLOW ».
+    extension.restore_original().await;
+    assert_eq!(extension.next_apply(Duration::from_secs(1)).await, None);
+    assert!(
+        !marker.exists(),
+        "la commande de la copie arrêtée a continué"
+    );
+}
+
+#[tokio::test]
+async fn restore_original_after_a_newer_copy_applies_nothing() {
+    let bus = PrivateBus::start();
+    let app = bus.connect().await;
+    serve(&app, upper_everything()).await.unwrap();
+
+    let mut extension = Extension::connect(&bus).await;
+    extension.copied("abc").await;
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("ABC"));
+    extension.copied("ABC").await;
+    // Une image copiée ensuite : l'Original ne la remplace pas.
+    extension.copied_non_text().await;
+    extension.restore_original().await;
+    assert_eq!(extension.next_apply(Duration::from_secs(1)).await, None);
+}
+
+#[tokio::test]
+async fn restore_original_without_original_stops_a_copy_in_progress() {
+    let marker = marker("restore-no-original");
+    let bus = PrivateBus::start();
+    let app = bus.connect().await;
+    serve(&app, slow_engine(&finishes_late(&marker)))
+        .await
+        .unwrap();
+
+    let mut extension = Extension::connect(&bus).await;
+    extension.copied("slow").await;
+    // Aucun Original : rien n'est écrit, « slow » reste tel que copié.
+    extension.restore_original().await;
+    assert_eq!(extension.next_apply(Duration::from_secs(1)).await, None);
+    assert!(
+        !marker.exists(),
+        "la commande de la copie arrêtée a continué"
+    );
+}
+
+/// Unique Règle : toute copie reçoit un « ! » de plus (étape non idempotente,
+/// qui révèle tout écho retraité).
+fn exclaim() -> Engine {
+    let yaml = "config_version: 1\npipelines:\n  exclaim:\n    - command: [sh, -c, 'cat; printf !']\nrules:\n  - match: ''\n    pipeline: exclaim\n";
+    Engine::new(Config::parse(yaml).unwrap())
+}
+
+#[tokio::test]
+async fn restore_original_before_the_echo_of_the_result_ends_on_the_original() {
+    let bus = PrivateBus::start();
+    let app = bus.connect().await;
+    serve(&app, exclaim()).await.unwrap();
+
+    let mut extension = Extension::connect(&bus).await;
+    extension.copied("abc").await;
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("abc!"));
+    // Restauration avant le retour de l'écho de « abc! », puis les deux échos.
+    extension.restore_original().await;
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("abc"));
+    extension.copied("abc!").await;
+    extension.copied("abc").await;
+    assert_eq!(extension.next_apply(Duration::from_secs(1)).await, None);
+}
+
+#[tokio::test]
+async fn two_quick_restores_end_on_the_original() {
+    let bus = PrivateBus::start();
+    let app = bus.connect().await;
+    serve(&app, exclaim()).await.unwrap();
+
+    let mut extension = Extension::connect(&bus).await;
+    extension.copied("abc").await;
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("abc!"));
+    extension.copied("abc!").await;
+    extension.restore_original().await;
+    extension.restore_original().await;
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("abc"));
+    assert_eq!(extension.next_apply(SOON).await.as_deref(), Some("abc"));
+    extension.copied("abc").await;
+    extension.copied("abc").await;
+    assert_eq!(extension.next_apply(Duration::from_secs(1)).await, None);
+}
