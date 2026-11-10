@@ -1,10 +1,10 @@
 //! Remplacer la config active : les copies suivantes suivent la nouvelle config,
 //! une config refusée laisse l'ancienne active, l'état du moteur est conservé.
 
-use std::sync::Arc;
+mod common;
 
-use engine::{Config, Engine, Outcome, Pipeline, Skip, StepFuture, Transformation};
-use tokio::sync::Semaphore;
+use common::{pids_written_to, scratch};
+use engine::{Config, Engine, Outcome, Skip};
 
 const UPPER: &str =
     "config_version: 1\npipelines:\n  p: [upper]\nrules:\n  - match: ''\n    pipeline: p\n";
@@ -65,32 +65,25 @@ async fn reloading_keeps_the_echo_of_our_last_write() {
     assert_eq!(engine.on_copy("AB").await, Outcome::Nothing(Skip::OwnWrite));
 }
 
-/// Met en majuscules une fois que le test ouvre la barrière.
-struct GatedUpper(Arc<Semaphore>);
-
-impl Transformation for GatedUpper {
-    fn name(&self) -> &str {
-        "gated-upper"
-    }
-
-    fn apply<'a>(&'a self, input: &'a str) -> StepFuture<'a> {
-        Box::pin(async move {
-            let _permit = self.0.acquire().await.unwrap();
-            Ok(input.to_uppercase())
-        })
-    }
-}
-
 /// Une copie en cours finit avec le Pipeline qu'elle avait au moment de la copie.
 #[tokio::test]
 async fn a_copy_in_progress_finishes_with_its_pipeline() {
-    let gate = Arc::new(Semaphore::new(0));
-    let engine = Engine::with_pipeline(Pipeline::new(vec![Box::new(GatedUpper(gate.clone()))]));
+    let pidfile = scratch("reload.pid");
+    let go = scratch("reload.go");
+    // Attend que le test crée `go`, puis met en majuscules.
+    let yaml = format!(
+        "config_version: 1\npipelines:\n  slow:\n    - command: [sh, -c, 'echo $$ > \"$0\"; while [ ! -e \"$1\" ]; do sleep 0.02; done; cat', '{}', '{}']\n      timeout: 5\n    - upper\nrules:\n  - match: ''\n    pipeline: slow\n",
+        pidfile.display(),
+        go.display()
+    );
+    let engine = engine(&yaml);
     let slow = tokio::spawn(engine.on_copy("ab"));
-    tokio::task::yield_now().await;
+    pids_written_to(&pidfile, 1).await;
 
     engine.load(LOWER).unwrap();
-    gate.add_permits(1);
+    std::fs::write(&go, "").unwrap();
     assert_eq!(slow.await.unwrap(), Outcome::Write("AB".into()));
     assert_eq!(engine.on_copy("Cd").await, Outcome::Write("cd".into()));
+    std::fs::remove_file(&pidfile).unwrap();
+    std::fs::remove_file(&go).unwrap();
 }

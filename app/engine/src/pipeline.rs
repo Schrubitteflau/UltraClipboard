@@ -13,15 +13,12 @@ pub struct Failure {
 }
 
 /// Suite ordonnée de Transformations.
-///
-/// Seam de test temporaire, public seulement pour que les tests branchent une
-/// étape lente ; à retirer quand une vraie étape `command` (`sleep`) pourra jouer ce rôle.
-pub struct Pipeline {
+pub(crate) struct Pipeline {
     steps: Vec<Box<dyn Transformation>>,
 }
 
 impl Pipeline {
-    pub fn new(steps: Vec<Box<dyn Transformation>>) -> Self {
+    pub(crate) fn new(steps: Vec<Box<dyn Transformation>>) -> Self {
         Self { steps }
     }
 

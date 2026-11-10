@@ -140,18 +140,6 @@ impl Config {
     pub(crate) fn rule_for(&self, text: &str) -> Option<&Rule> {
         self.rules.iter().find(|rule| rule.pattern.is_match(text))
     }
-
-    /// Une seule Règle qui applique ce Pipeline à tout texte.
-    pub(crate) fn match_all(name: &str, pipeline: Pipeline) -> Self {
-        Self {
-            notifications: Notifications::default(),
-            rules: vec![Rule {
-                pattern: Regex::new("").unwrap(),
-                pipeline_name: name.to_owned(),
-                pipeline: Arc::new(pipeline),
-            }],
-        }
-    }
 }
 
 fn field<'a>(entries: &'a [(String, Value)], name: &str) -> Option<&'a Value> {
@@ -288,7 +276,9 @@ fn parse_step(
         BuildError::Unknown => error(path, format!("Transformation inconnue « {name} »")),
         BuildError::Params { field, reason } => {
             let mut at = format!("{path}.{name}");
-            if !field.is_empty() {
+            if field.starts_with('[') {
+                at = format!("{at}{field}");
+            } else if !field.is_empty() {
                 at = format!("{at}.{field}");
             }
             error(at, reason)

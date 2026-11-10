@@ -98,6 +98,20 @@ impl Extension {
             .unwrap();
     }
 
+    /// Signale une copie sans texte (image, fichiers…).
+    pub async fn copied_non_text(&self) {
+        self.conn
+            .call_method(
+                Some(BUS_NAME),
+                OBJECT_PATH,
+                Some(INTERFACE),
+                "CopiedNonText",
+                &(),
+            )
+            .await
+            .unwrap();
+    }
+
     /// Prochain texte reçu par `Apply`, ou `None` s'il n'en vient aucun dans le délai.
     pub async fn next_apply(&mut self, within: Duration) -> Option<String> {
         let msg = tokio::time::timeout(within, self.applies.next())

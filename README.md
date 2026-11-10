@@ -19,7 +19,7 @@ Vocabulaire : voir [GLOSSARY.md](GLOSSARY.md). Décisions structurantes : [docs/
 Comportements garantis :
 
 - **Tout ou rien** : si une étape échoue ou dépasse son délai, le presse-papier n'est pas touché.
-- **La dernière copie gagne** : une nouvelle copie annule le Pipeline en cours, son résultat est jeté.
+- **La dernière copie gagne** : une nouvelle copie, texte ou non (image, fichiers), arrête le Pipeline en cours (le programme d'une `command` est tué) ; son résultat est jeté.
 - **Pas de boucle** : ce qu'UltraClipboard écrit lui-même n'est jamais retraité.
 - **Coller trop tôt** (avant la fin d'une Transformation lente) donne l'Original.
 - **Restaurer l'Original** : un raccourci remet le texte d'avant la dernière Transformation.
@@ -56,7 +56,7 @@ rules:                      # la première Règle qui correspond gagne
 | `trim` | Retire les espaces en début et fin |
 | `upper` / `lower` | Majuscules / minuscules |
 | `youtube` | Récupère titre et chaîne via oEmbed, rend le `template` (`{title}`, `{url}`, `{author_name}`, `{author_url}`, `{thumbnail_url}`) |
-| `command` | Lance un exécutable (liste d'arguments, sans shell) : texte sur stdin, résultat sur stdout. Code ≠ 0 ou délai dépassé = échec ; stderr visible dans l'historique |
+| `command` | Lance un exécutable (liste d'arguments, sans shell) : texte sur stdin, résultat sur stdout. Code ≠ 0 ou délai dépassé = échec ; stderr visible dans l'historique. Sortie limitée à 8 Mo (au-delà : échec), stderr coupée après 64 Ko. Un processus lancé en arrière-plan doit rediriger ses sorties (`cmd >/dev/null 2>&1 &`), sinon l'étape l'attend jusqu'au délai |
 
 ## Interface
 
