@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use common::{Extension, PrivateBus};
 use engine::{Config, Engine, SAMPLE_CONFIG};
-use ultraclipboard::{follow_config, serve};
+use ultraclipboard::{follow_config, serve, start_engine};
 
 const SOON: Duration = Duration::from_secs(5);
 const NONE_WITHIN: Duration = Duration::from_millis(300);
@@ -58,6 +58,20 @@ async fn an_invalid_config_at_startup_runs_without_rules() {
     assert_eq!(engine.config_error().unwrap().field, "config_version");
     // Le fichier de l'utilisateur n'est pas remplacé par l'exemple.
     assert_eq!(std::fs::read_to_string(&path).unwrap(), yaml);
+}
+
+/// Le moteur de l'appli, refusé dès le lancement : la fenêtre doit dire qu'aucune
+/// config n'a été chargée, pas qu'une config vide est active.
+#[tokio::test]
+async fn the_app_engine_with_an_invalid_first_config_has_nothing_loaded() {
+    let path = scratch("app-invalid").join("config.yaml");
+    std::fs::write(&path, "rules: []\n").unwrap();
+
+    let (engine, _follower) = start_engine(Some(path));
+
+    let state = engine.config_state();
+    assert!(!state.loaded);
+    assert_eq!(state.error.unwrap().error.field, "config_version");
 }
 
 #[tokio::test]
