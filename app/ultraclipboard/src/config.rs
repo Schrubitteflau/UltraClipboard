@@ -33,14 +33,19 @@ pub fn config_path() -> Option<PathBuf> {
 /// À appeler dans un runtime tokio.
 pub fn start_engine(path: Option<PathBuf>) -> (Engine, Option<ConfigFollower>) {
     let engine = Engine::default();
-    let follower = match path {
+    let follower = follow_config_at(path, &engine);
+    (engine, follower)
+}
+
+/// [`follow_config`] quand il y a un chemin ; sinon, le dit et ne suit rien.
+pub(crate) fn follow_config_at(path: Option<PathBuf>, engine: &Engine) -> Option<ConfigFollower> {
+    match path {
         Some(path) => Some(follow_config(path, engine.clone())),
         None => {
             eprintln!("ultraclipboard: ni XDG_CONFIG_HOME ni HOME, aucune Règle active");
             None
         }
-    };
-    (engine, follower)
+    }
 }
 
 /// Délai sans nouvel évènement sur le fichier avant de le relire : un éditeur
