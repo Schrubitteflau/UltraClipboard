@@ -9,8 +9,9 @@ use zbus::Connection;
 use crate::config::follow_config_at;
 use crate::{ConfigFollower, NotificationSender, ServeError, queue_notifications, serve};
 
-/// Appli démarrée : le service tourne tant que `conn` vit ; l'envoi des
-/// notifications et le suivi de la config s'arrêtent quand on la lâche.
+/// Appli démarrée : le service tourne jusqu'à la fin du processus, même si on
+/// lâche `conn` (voir [`serve`]) ; l'envoi des notifications et le suivi de la
+/// config s'arrêtent quand on la lâche.
 pub struct Started {
     pub conn: Connection,
     pub engine: Engine,

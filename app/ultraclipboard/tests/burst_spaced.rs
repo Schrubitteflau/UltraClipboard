@@ -2,6 +2,10 @@
 //! laisse aux copies précédentes le temps de finir. Le dernier Apply doit
 //! rester celui de la dernière copie (US12) : chaque écriture part dans l'ordre
 //! où le moteur l'a décidée, jamais après celle d'une copie plus récente.
+//!
+//! Test de charge : la course qu'il vise ne se produit de façon fiable que sur
+//! une machine chargée (il passe sur l'ancien code, machine au repos). Le garde
+//! déterministe est côté moteur, `engine/tests/writes.rs`.
 
 mod common;
 use common::{Extension, PrivateBus, upper_everything};
