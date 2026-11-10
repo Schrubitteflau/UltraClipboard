@@ -1,0 +1,7 @@
+{
+  "uuid": "ultraclipboard@grochonnou",
+  "name": "UltraClipboard",
+  "description": "Capteur du presse-papier pour l'appli UltraClipboard : signale chaque copie et écrit les résultats transformés.",
+  "shell-version": ["50"],
+  "url": ""
+}

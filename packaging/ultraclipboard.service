@@ -1,0 +1,11 @@
+[Unit]
+Description=UltraClipboard — transformation automatique du presse-papier
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/ultraclipboard
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
