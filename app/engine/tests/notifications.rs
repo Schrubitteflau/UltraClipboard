@@ -229,3 +229,27 @@ async fn a_failure_without_error_output_has_no_cause() {
     };
     assert_eq!(failure.cause(), None);
 }
+
+#[tokio::test]
+async fn a_reapply_notifies_like_a_copy() {
+    let engine = engine("all");
+    engine.set_paused(true);
+    let mut notices = engine.subscribe_notifications();
+    engine.reapply("ok").await;
+    assert_eq!(
+        drain(&mut notices),
+        [Notification::Succeeded {
+            pipeline: "shout".into()
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_copy_made_while_paused_notifies_nothing() {
+    let engine = engine("all");
+    engine.set_paused(true);
+    let mut notices = engine.subscribe_notifications();
+    engine.on_copy("ok").await;
+    engine.on_copy("ko").await;
+    assert_eq!(drain(&mut notices), []);
+}

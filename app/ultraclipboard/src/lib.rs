@@ -6,8 +6,10 @@
 //! résultat est prêt, le service émet le signal `Apply(text)` et l'extension
 //! l'écrit dans le presse-papier. `RestoreOriginal()` (raccourci de
 //! l'extension) annule la dernière Transformation par un `Apply` de
-//! l'Original. Toute copie, texte ou non, arrête le
-//! traitement de la précédente.
+//! l'Original. `Reapply(text)` (raccourci de l'extension) réapplique les
+//! Règles au presse-papier actuel, même en pause ; `SetPaused(paused)` met en
+//! pause ou reprend. Toute copie, texte ou non, arrête le traitement de la
+//! précédente.
 
 mod app;
 mod config;
@@ -83,24 +85,19 @@ impl Service {
     /// Signale une copie. Rend la main aussitôt : le traitement part en tâche de
     /// fond et son résultat arrive par `Apply`.
     fn copied(&self, text: String, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
-        let work = self.engine.on_copy(&text);
-        let emitter = emitter.into_owned();
-        tokio::spawn(async move {
-            match work.await {
-                Outcome::Write(output) => {
-                    if let Err(err) = Self::apply(&emitter, &output).await {
-                        eprintln!("ultraclipboard: échec d'émission de Apply : {err}");
-                    }
-                }
-                // Jamais la sortie d'erreur : elle peut contenir le texte copié et
-                // ce journal est persistant. Elle reste dans l'historique, en mémoire.
-                Outcome::Failed(failure) => eprintln!(
-                    "ultraclipboard: échec de l'étape {} : {}",
-                    failure.step, failure.message
-                ),
-                Outcome::Nothing(_) | Outcome::Cancelled => {}
-            }
-        });
+        Self::settle(self.engine.on_copy(&text), emitter);
+    }
+
+    /// Réapplique les Règles à `text`, le contenu actuel du presse-papier
+    /// (raccourci de l'extension) : comme `Copied`, mais aussi en pause et même
+    /// si `text` est notre propre écriture. Résultat par `Apply`.
+    fn reapply(&self, text: String, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) {
+        Self::settle(self.engine.reapply(&text), emitter);
+    }
+
+    /// Met en pause (aucune copie transformée) ou reprend, jusqu'au redémarrage.
+    fn set_paused(&self, paused: bool) {
+        self.engine.set_paused(paused);
     }
 
     /// Signale une copie sans texte (image, fichiers…) : rien à transformer,
@@ -125,4 +122,30 @@ impl Service {
     /// Demande à l'extension d'écrire ce texte dans le presse-papier.
     #[zbus(signal)]
     async fn apply(emitter: &SignalEmitter<'_>, text: &str) -> zbus::Result<()>;
+}
+
+impl Service {
+    /// Lance le traitement en tâche de fond ; un texte à écrire part par `Apply`.
+    fn settle(
+        work: impl std::future::Future<Output = Outcome> + Send + 'static,
+        emitter: SignalEmitter<'_>,
+    ) {
+        let emitter = emitter.into_owned();
+        tokio::spawn(async move {
+            match work.await {
+                Outcome::Write(output) => {
+                    if let Err(err) = Self::apply(&emitter, &output).await {
+                        eprintln!("ultraclipboard: échec d'émission de Apply : {err}");
+                    }
+                }
+                // Jamais la sortie d'erreur : elle peut contenir le texte copié et
+                // ce journal est persistant. Elle reste dans l'historique, en mémoire.
+                Outcome::Failed(failure) => eprintln!(
+                    "ultraclipboard: échec de l'étape {} : {}",
+                    failure.step, failure.message
+                ),
+                Outcome::Nothing(_) | Outcome::Cancelled => {}
+            }
+        });
+    }
 }
