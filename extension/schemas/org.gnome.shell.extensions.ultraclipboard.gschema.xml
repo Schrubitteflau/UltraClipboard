@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="ultraclipboard">
+  <schema id="org.gnome.shell.extensions.ultraclipboard"
+          path="/org/gnome/shell/extensions/ultraclipboard/">
+    <key name="ultraclipboard-restore-original" type="as">
+      <default><![CDATA[['<Super><Shift>v']]]></default>
+      <summary>Restaurer l'Original</summary>
+      <description>Remet le texte d'avant la dernière Transformation.</description>
+    </key>
+    <key name="ultraclipboard-reapply" type="as">
+      <default><![CDATA[['<Super><Shift>r']]]></default>
+      <summary>Réappliquer</summary>
+      <description>Réapplique les Règles au contenu actuel du presse-papier, même en pause.</description>
+    </key>
+  </schema>
+</schemalist>
