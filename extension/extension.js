@@ -40,13 +40,16 @@ export default class UltraClipboardExtension extends Extension {
 
     _onCopy() {
         this._clipboard.get_text(St.ClipboardType.CLIPBOARD, (_clipboard, text) => {
-            // Pas de texte (image, fichier…) : on ne fait rien.
-            if (text === null)
-                return;
+            // Pas de texte (image, fichier…) : rien à transformer, mais l'appli
+            // doit savoir qu'une copie a eu lieu, pour qu'un résultat tardif ne
+            // la remplace pas.
+            const [method, params] = text === null
+                ? ['CopiedNonText', null]
+                : ['Copied', new GLib.Variant('(s)', [text])];
 
             Gio.DBus.session.call(
-                BUS_NAME, OBJECT_PATH, IFACE, 'Copied',
-                new GLib.Variant('(s)', [text]), null,
+                BUS_NAME, OBJECT_PATH, IFACE, method,
+                params, null,
                 Gio.DBusCallFlags.NO_AUTO_START, -1, null,
                 (connection, result) => {
                     try {

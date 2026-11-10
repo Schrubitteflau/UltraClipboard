@@ -19,7 +19,7 @@ Vocabulaire : voir [GLOSSARY.md](GLOSSARY.md). Décisions structurantes : [docs/
 Comportements garantis :
 
 - **Tout ou rien** : si une étape échoue ou dépasse son délai, le presse-papier n'est pas touché.
-- **La dernière copie gagne** : une nouvelle copie annule le Pipeline en cours, son résultat est jeté.
+- **La dernière copie gagne** : une nouvelle copie, texte ou non (image, fichiers), arrête le Pipeline en cours (le programme d'une `command` est tué) ; son résultat est jeté.
 - **Pas de boucle** : ce qu'UltraClipboard écrit lui-même n'est jamais retraité.
 - **Coller trop tôt** (avant la fin d'une Transformation lente) donne l'Original.
 - **Restaurer l'Original** : un raccourci remet le texte d'avant la dernière Transformation.

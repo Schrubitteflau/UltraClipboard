@@ -1,8 +1,10 @@
 //! Transformation `command`, avec de vrais exécutables du système.
 
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+mod common;
+
+use common::{pids, pids_written_to, scratch, wait_dead};
 use engine::{Config, ConfigError, Engine, Failure, Outcome};
 
 /// Moteur dont l'unique Règle applique à toute copie le Pipeline `steps`
@@ -58,32 +60,6 @@ async fn false_fails_with_no_error_output() {
     );
 }
 
-/// Vrai tant que le processus `pid` existe et n'est pas un zombie en attente de
-/// ramassage (un processus tué n'existe plus : seul son numéro reste un instant).
-fn alive(pid: u32) -> bool {
-    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        // Troisième champ, après le nom entre parenthèses : l'état.
-        Ok(stat) => !stat
-            .rsplit_once(") ")
-            .is_some_and(|(_, rest)| rest.starts_with('Z')),
-        Err(_) => false,
-    }
-}
-
-async fn wait_dead(pid: u32) -> bool {
-    for _ in 0..100 {
-        if !alive(pid) {
-            return true;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    false
-}
-
-fn pids(stderr: &str) -> Vec<u32> {
-    stderr.lines().map(|line| line.parse().unwrap()).collect()
-}
-
 #[tokio::test]
 async fn past_its_timeout_the_command_fails_and_is_killed_with_its_children() {
     // `sh` lance `sleep` en enfant et l'attend : les deux doivent être tués.
@@ -105,15 +81,6 @@ async fn past_its_timeout_the_command_fails_and_is_killed_with_its_children() {
     }
 }
 
-/// Fichier de travail propre au test, sous le dossier temporaire de cargo.
-fn scratch(name: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("command");
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(name);
-    let _ = std::fs::remove_file(&path);
-    path
-}
-
 #[tokio::test]
 async fn an_abandoned_copy_kills_its_command() {
     let pidfile = scratch("abandoned.pid");
@@ -122,14 +89,8 @@ async fn an_abandoned_copy_kills_its_command() {
         pidfile.display()
     ));
     let copy = tokio::spawn(engine.on_copy("abc"));
-    let pid = loop {
-        if let Some(pid) = std::fs::read_to_string(&pidfile)
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-        {
-            break pid;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    let [pid] = pids_written_to(&pidfile, 1).await[..] else {
+        unreachable!()
     };
     copy.abort();
     let _ = copy.await;
