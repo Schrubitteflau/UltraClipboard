@@ -75,6 +75,8 @@ sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev libayatana-appindicator3-
 
 Puis `./install.sh` (il vérifie ces prérequis avant de compiler).
 
+Après une mise à jour du dépôt, relance `./install.sh` (ou au moins `glib-compile-schemas extension/schemas`), puis déconnecte-toi et reconnecte-toi : sans schéma compilé, l'extension ne se charge pas.
+
 ## Architecture
 
 ```
