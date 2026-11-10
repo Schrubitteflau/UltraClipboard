@@ -14,6 +14,7 @@ pipelines:
   #   - trim
   #   - command: ["python3", "~/scripts/fix-numbers.py"]
   #     timeout: 10
+  #   # Arrière-plan : rediriger ses sorties (`cmd >/dev/null 2>&1 &`), sinon l'étape attend le délai.
 
 # Règles : la première dont le motif (expression régulière) est trouvé dans le
 # texte copié applique son Pipeline ; aucune Règle = presse-papier intact.
