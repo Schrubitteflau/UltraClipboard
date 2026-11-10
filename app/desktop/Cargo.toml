@@ -16,7 +16,7 @@ tauri-build = { version = "2.7.4", features = [] }
 engine = { version = "0.1.0", path = "../engine" }
 ultraclipboard = { version = "0.1.0", path = "../ultraclipboard" }
 tauri = { version = "2.12.5", features = ["tray-icon"] }
-tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync"] }
 zbus = { version = "6.2.1", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]

@@ -1,4 +1,10 @@
 //! État partagé du moteur entre les copies.
+//!
+//! Deux compteurs : le numéro du dernier traitement lancé (copie ou
+//! réapplication), qui arrête celui d'avant, et celui de la dernière vraie
+//! copie, qui seule change le presse-papier : les échos attendus et l'Original
+//! restaurable ne survivent pas à une copie, mais survivent à une réapplication,
+//! à une restauration ou à une mise en pause.
 
 use std::collections::VecDeque;
 
@@ -9,7 +15,7 @@ use tokio::sync::watch;
 /// ancienne est oubliée.
 const PENDING_ECHOES: usize = 4;
 
-/// Numéro d'ordre d'une copie acceptée.
+/// Numéro d'ordre d'un traitement (copie acceptée ou réapplication).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Ticket(u64);
 
@@ -27,11 +33,14 @@ pub(crate) struct State {
     /// numéro de la dernière copie au moment de l'écriture : leur copie en
     /// retour ne doit pas être retraitée. Chacun est ignoré une fois.
     pending_echoes: VecDeque<(Ticket, String)>,
-    /// Original de la dernière Transformation appliquée, avec le numéro de la
-    /// copie qu'elle a transformée.
+    /// Original de la dernière Transformation appliquée, avec le numéro du
+    /// traitement (copie ou réapplication) qui l'a appliquée.
     original: Option<(Ticket, String)>,
-    /// Numéro de la dernière copie acceptée, diffusé aux copies en cours.
+    /// Numéro du dernier traitement lancé, diffusé aux traitements en cours :
+    /// tout autre traitement s'arrête.
     latest: watch::Sender<u64>,
+    /// Numéro de la dernière vraie copie (avec ou sans texte).
+    last_copy: Ticket,
 }
 
 impl Default for State {
@@ -40,6 +49,7 @@ impl Default for State {
             pending_echoes: VecDeque::new(),
             original: None,
             latest: watch::Sender::new(0),
+            last_copy: Ticket(0),
         }
     }
 }
@@ -51,16 +61,30 @@ impl State {
     /// nouvelle copie : il n'annule pas une copie en cours. Une copie sans rapport
     /// n'efface pas les écritures retenues, dont l'écho peut encore arriver après
     /// elle ; une écriture plus récente faite sans nouvelle copie non plus
-    /// (restauration faite avant le retour de l'écho du résultat). Si les deux
-    /// lectures de l'extension voient le texte restauré (deux échos
-    /// identiques), le second est traité comme une copie : rare, et on ne peut
-    /// pas le distinguer d'une vraie copie.
+    /// (restauration ou réapplication faite avant le retour de l'écho du
+    /// résultat). Si les deux lectures de l'extension voient le texte restauré
+    /// (deux échos identiques), le second est traité comme une copie : rare, et
+    /// on ne peut pas le distinguer d'une vraie copie.
     pub(crate) fn register(&mut self, text: &str) -> Registration {
         if let Some(echo) = self.pending_echoes.iter().position(|(_, w)| w == text) {
             self.pending_echoes.remove(echo);
             return Registration::OwnWrite;
         }
+        self.last_copy = self.supersede();
+        self.accept(self.last_copy)
+    }
+
+    /// Enregistre une réapplication : traitée comme une copie de ce texte, même
+    /// s'il est notre propre écriture, et elle arrête le traitement en cours.
+    /// Mais ce n'est pas une copie (le presse-papier n'a pas changé) : les
+    /// échos attendus restent attendus et l'Original reste restaurable tant
+    /// qu'elle n'applique pas de Transformation.
+    pub(crate) fn register_explicit(&mut self) -> Registration {
         let ticket = self.supersede();
+        self.accept(ticket)
+    }
+
+    fn accept(&self, ticket: Ticket) -> Registration {
         Registration::Accepted(
             ticket,
             Superseded {
@@ -73,22 +97,28 @@ impl State {
     /// Enregistre une copie sans texte : rien à traiter, mais elle rend la
     /// copie en cours dépassée.
     pub(crate) fn register_without_text(&mut self) {
+        self.last_copy = self.supersede();
+    }
+
+    /// Arrête le traitement en cours, s'il y en a un (mise en pause), sans
+    /// rien changer d'autre.
+    pub(crate) fn cancel(&mut self) {
         self.supersede();
     }
 
-    /// Numéro de la nouvelle dernière copie ; les copies en cours sont dépassées.
+    /// Numéro du nouveau dernier traitement ; ceux en cours sont dépassés.
     fn supersede(&mut self) -> Ticket {
         self.latest.send_modify(|latest| *latest += 1);
         Ticket(*self.latest.borrow())
     }
 
-    /// Vrai si aucune copie n'a été acceptée depuis celle-ci.
+    /// Vrai si aucun traitement n'a été lancé depuis celui-ci.
     pub(crate) fn is_current(&self, ticket: Ticket) -> bool {
         ticket.0 == *self.latest.borrow()
     }
 
-    /// La copie `ticket` (texte `original`) est transformée en `output`, qu'on
-    /// écrit : retient son écho à ignorer et l'Original à restaurer.
+    /// Le traitement `ticket` (texte `original`) est transformé en `output`,
+    /// qu'on écrit : retient son écho à ignorer et l'Original à restaurer.
     pub(crate) fn transformed(&mut self, ticket: Ticket, original: &str, output: &str) {
         self.wrote(output);
         self.original = Some((ticket, original.to_owned()));
@@ -97,17 +127,14 @@ impl State {
     /// Texte à écrire pour annuler la dernière Transformation appliquée, retenu
     /// comme notre écriture (son écho est ignoré).
     ///
-    /// La dernière copie gagne : si une copie a été faite depuis cette
-    /// Transformation (ou sans Original), rien n'est écrit, et la copie en
-    /// cours de traitement, s'il y en a une, s'arrête et reste telle que copiée.
+    /// Le traitement en cours, s'il y en a un, s'arrête. La dernière copie
+    /// gagne : si une copie a été faite depuis cette Transformation (ou sans
+    /// Original), rien n'est écrit et cette copie reste telle que copiée.
     pub(crate) fn restore(&mut self) -> Option<String> {
+        self.supersede();
         let original = match &self.original {
-            Some((ticket, original)) if self.is_current(*ticket) => original.clone(),
-            _ => {
-                // Arrête le traitement de la copie plus récente, s'il tourne encore.
-                self.supersede();
-                return None;
-            }
+            Some((ticket, original)) if *ticket >= self.last_copy => original.clone(),
+            _ => return None,
         };
         self.wrote(&original);
         Some(original)
@@ -120,17 +147,16 @@ impl State {
     /// copie suivante à sa place), et une vraie copie du même texte ne doit pas
     /// être ignorée plus tard.
     fn wrote(&mut self, text: &str) {
-        let latest = *self.latest.borrow();
-        self.pending_echoes.retain(|(at, _)| at.0 == latest);
+        let last_copy = self.last_copy;
+        self.pending_echoes.retain(|(at, _)| *at == last_copy);
         if self.pending_echoes.len() == PENDING_ECHOES {
             self.pending_echoes.pop_front();
         }
-        self.pending_echoes
-            .push_back((Ticket(latest), text.to_owned()));
+        self.pending_echoes.push_back((last_copy, text.to_owned()));
     }
 }
 
-/// Se termine dès qu'une copie plus récente est acceptée.
+/// Se termine dès qu'un traitement plus récent est lancé.
 #[derive(Debug)]
 pub(crate) struct Superseded {
     ticket: Ticket,

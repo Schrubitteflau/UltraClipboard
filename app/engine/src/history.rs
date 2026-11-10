@@ -58,7 +58,7 @@ const EMPTY_RESULT: &str = "résultat vide";
 
 impl HistoryStatus {
     /// Statut à retenir pour l'issue d'une copie qui a déclenché un Pipeline ;
-    /// `None` quand aucun Pipeline n'a tourné (aucune Règle, écho).
+    /// `None` quand aucun Pipeline n'a tourné (aucune Règle, écho, pause).
     pub(crate) fn of(outcome: &Outcome, original: &str) -> Option<Self> {
         Some(match outcome {
             Outcome::Write(result) => Self::Success {
@@ -78,7 +78,7 @@ impl HistoryStatus {
                 stderr: failure.stderr.clone(),
             },
             Outcome::Cancelled => Self::Cancelled,
-            Outcome::Nothing(Skip::NoRule | Skip::OwnWrite) => return None,
+            Outcome::Nothing(Skip::NoRule | Skip::OwnWrite | Skip::Paused) => return None,
         })
     }
 }
