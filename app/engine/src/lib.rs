@@ -9,6 +9,7 @@
 
 mod config;
 mod history;
+mod notify;
 mod pipeline;
 mod state;
 mod transformations;
@@ -22,10 +23,12 @@ use tokio::sync::watch;
 
 pub use config::{Config, ConfigError, NamedPipeline, Notifications, Rule, SAMPLE_CONFIG, Step};
 pub use history::{HISTORY_CAP, HistoryEntry, HistoryStatus, TEXT_CAP};
+pub use notify::Notification;
 pub use pipeline::Failure;
 pub use transformations::Endpoints;
 
 use history::History;
+use notify::Notifier;
 use state::{Registration, State, Ticket};
 
 /// Issue d'une copie.
@@ -105,6 +108,7 @@ pub struct Engine {
     state: Arc<Mutex<State>>,
     /// Hors de la config : un rechargement ne le touche pas.
     history: Arc<Mutex<History>>,
+    notifier: Arc<Notifier>,
 }
 
 /// Config active et refus du dernier chargement, s'il a échoué.
@@ -145,6 +149,7 @@ impl Engine {
             changes: Arc::new(watch::Sender::new(())),
             state: Arc::default(),
             history: Arc::default(),
+            notifier: Arc::default(),
         }
     }
 
@@ -169,22 +174,32 @@ impl Engine {
                         kind: RefusalKind::Invalid,
                         error: err.clone(),
                     });
-                    Err(err)
+                    Err((err, loaded.active.notifications()))
                 }
             }
         };
         self.changes.send_replace(());
-        result
+        result.map_err(|(err, level)| {
+            self.notifier
+                .send(level, Notification::ConfigRejected(err.clone()));
+            err
+        })
     }
 
     /// La config n'a pas pu être lue (fichier illisible…) : l'active reste en
     /// place et cette erreur est retenue comme celle d'un chargement refusé.
     pub fn reject_config(&self, error: ConfigError) {
-        self.config.write().unwrap().error = Some(Refusal {
-            kind: RefusalKind::Unreadable,
-            error,
-        });
+        let level = {
+            let mut loaded = self.config.write().unwrap();
+            loaded.error = Some(Refusal {
+                kind: RefusalKind::Unreadable,
+                error: error.clone(),
+            });
+            loaded.active.notifications()
+        };
         self.changes.send_replace(());
+        self.notifier
+            .send(level, Notification::ConfigRejected(error));
     }
 
     /// Ce qui est chargé : Règles et Pipelines actifs, refus du dernier chargement.
@@ -225,6 +240,24 @@ impl Engine {
         loaded.error.as_ref().map(|refusal| refusal.error.clone())
     }
 
+    /// S'abonne aux notifications que le moteur décide d'envoyer à partir de
+    /// maintenant. L'appli les montre telles quelles.
+    pub fn subscribe_notifications(&self) -> tokio::sync::broadcast::Receiver<Notification> {
+        self.notifier.subscribe()
+    }
+
+    /// Coupe (ou rétablit) toutes les notifications jusqu'au redémarrage, quel
+    /// que soit le niveau de la config. Rétablies, elles suivent de nouveau ce
+    /// niveau.
+    pub fn set_notifications_muted(&self, muted: bool) {
+        self.notifier.set_muted(muted);
+    }
+
+    /// Vrai si les notifications sont coupées pour la session.
+    pub fn notifications_muted(&self) -> bool {
+        self.notifier.muted()
+    }
+
     /// Signale une copie sans texte (image, fichiers…).
     ///
     /// Rien n'est écrit, mais c'est une copie plus récente : le traitement
@@ -263,6 +296,8 @@ impl Engine {
             });
         let state = Arc::clone(&self.state);
         let history = Arc::clone(&self.history);
+        let notifier = Arc::clone(&self.notifier);
+        let config = Arc::clone(&self.config);
         let text = text.to_owned();
         async move {
             let (ticket, superseded) = match registration {
@@ -280,6 +315,31 @@ impl Engine {
                 () = superseded.wait() => None,
             };
             let outcome = settle(&state, ticket, &text, result);
+            // Le niveau de la config active quand le Pipeline finit.
+            let level = config.read().unwrap().active.notifications();
+            match &outcome {
+                Outcome::Write(_) => notifier.send(
+                    level,
+                    Notification::Succeeded {
+                        pipeline: name.clone(),
+                    },
+                ),
+                Outcome::Failed(failure) => notifier.send(
+                    level,
+                    Notification::Failed {
+                        pipeline: name.clone(),
+                        failure: failure.clone(),
+                    },
+                ),
+                Outcome::Nothing(Skip::EmptyResult) => notifier.send(
+                    level,
+                    Notification::EmptyResult {
+                        pipeline: name.clone(),
+                    },
+                ),
+                Outcome::Nothing(_) | Outcome::Cancelled => {}
+            }
+            // Annulée, échouée ou réussie : la copie entre dans l'historique.
             if let Some(status) = HistoryStatus::of(&outcome, &text) {
                 let entry = HistoryEntry {
                     at,

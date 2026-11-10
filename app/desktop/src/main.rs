@@ -7,13 +7,15 @@
 use std::process::ExitCode;
 
 use engine::{ConfigState, Engine, HistoryEntry};
+use tauri::Wry;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Emitter, Manager, State, WindowEvent};
-use ultraclipboard::{BUS_NAME, ConfigFollower, ServeError, serve, start_engine};
+use ultraclipboard::{BUS_NAME, start_app};
 
 const MAIN_WINDOW: &str = "main";
 const MENU_OPEN: &str = "open";
+const MENU_NOTIFICATIONS: &str = "notifications";
 const MENU_QUIT: &str = "quit";
 /// Événement poussé à la fenêtre à chaque chargement de config ; porte un [`ConfigState`].
 const CONFIG_CHANGED: &str = "config-changed";
@@ -23,7 +25,9 @@ const HISTORY_CHANGED: &str = "history-changed";
 fn main() -> ExitCode {
     // Un seul runtime, partagé par le service D-Bus, le moteur et Tauri.
     let runtime = tokio::runtime::Runtime::new().expect("runtime tokio");
-    let (conn, engine, _follower) = match runtime.block_on(start_service()) {
+    let connect = || zbus::connection::Builder::session().build();
+    // Gardée jusqu'à la fin : avec elle, l'envoi des notifications et le suivi de la config.
+    let started = match runtime.block_on(start_app(ultraclipboard::config_path(), connect)) {
         Ok(started) => started,
         Err(err) => {
             eprintln!("ultraclipboard: {err}");
@@ -35,8 +39,8 @@ fn main() -> ExitCode {
 
     tauri::Builder::default()
         // La connexion vit aussi longtemps que l'appli : le service avec elle.
-        .manage(conn)
-        .manage(engine)
+        .manage(started.conn.clone())
+        .manage(started.engine.clone())
         .invoke_handler(tauri::generate_handler![config_state, config_path, history])
         .setup(|app| {
             add_tray(app)?;
@@ -54,15 +58,6 @@ fn main() -> ExitCode {
         .run(tauri::generate_context!())
         .expect("démarrage de Tauri");
     ExitCode::SUCCESS
-}
-
-/// Charge la config (puis la suit à chaque enregistrement) et expose le moteur sur
-/// le bus de session. Le suivi s'arrête quand on lâche le [`ConfigFollower`].
-async fn start_service() -> Result<(zbus::Connection, Engine, Option<ConfigFollower>), ServeError> {
-    let (engine, follower) = start_engine(ultraclipboard::config_path());
-    let conn = zbus::connection::Builder::session().build().await?;
-    serve(&conn, engine.clone()).await?;
-    Ok((conn, engine, follower))
 }
 
 /// Ce qui est chargé (vue « Règles »).
@@ -109,18 +104,28 @@ fn push_config_changes(app: &App) {
 
 /// Icône AppIndicator. Sous Linux le clic sur l'icône n'émet rien : tout passe par le menu.
 fn add_tray(app: &App) -> tauri::Result<()> {
+    let muted = app.state::<Engine>().notifications_muted();
+    let notifications = MenuItem::with_id(
+        app,
+        MENU_NOTIFICATIONS,
+        notifications_label(muted),
+        true,
+        None::<&str>,
+    )?;
     let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, MENU_OPEN, "Ouvrir", true, None::<&str>)?,
+            &notifications,
             &MenuItem::with_id(app, MENU_QUIT, "Quitter", true, None::<&str>)?,
         ],
     )?;
     let mut tray = TrayIconBuilder::new()
         .tooltip("UltraClipboard")
         .menu(&menu)
-        .on_menu_event(|app, event| match event.id().as_ref() {
+        .on_menu_event(move |app, event| match event.id().as_ref() {
             MENU_OPEN => show_window(app),
+            MENU_NOTIFICATIONS => toggle_notifications(app, &notifications),
             MENU_QUIT => app.exit(0),
             _ => {}
         });
@@ -129,6 +134,23 @@ fn add_tray(app: &App) -> tauri::Result<()> {
     }
     tray.build(app)?;
     Ok(())
+}
+
+/// Coupe ou rétablit les notifications jusqu'au redémarrage.
+fn toggle_notifications(app: &AppHandle, item: &MenuItem<Wry>) {
+    let engine = app.state::<Engine>();
+    let muted = !engine.notifications_muted();
+    engine.set_notifications_muted(muted);
+    let _ = item.set_text(notifications_label(muted));
+}
+
+/// Libellé de l'entrée de menu : l'action qu'elle fait.
+fn notifications_label(muted: bool) -> &'static str {
+    if muted {
+        "Rétablir les notifications"
+    } else {
+        "Couper les notifications"
+    }
 }
 
 fn show_window(app: &AppHandle) {

@@ -198,6 +198,9 @@ const STDOUT_CAP: usize = 8_000_000;
 /// bloquer le programme).
 const STDERR_CAP: usize = 64_000;
 
+/// Début de la ligne ajoutée à la sortie d'erreur quand elle est coupée.
+pub(crate) const STDERR_CUT: &str = "[… sortie d'erreur coupée";
+
 /// La sortie standard dépasse [`STDOUT_CAP`].
 struct TooLarge;
 
@@ -251,10 +254,7 @@ fn describe(status: ExitStatus) -> String {
 fn failure(message: String, stderr: Capped) -> StepError {
     let mut text = String::from_utf8_lossy(&stderr.kept).into_owned();
     if stderr.cut {
-        text.push_str(&format!(
-            "\n[… sortie d'erreur coupée après {} Ko]\n",
-            STDERR_CAP / 1000
-        ));
+        text.push_str(&format!("\n{STDERR_CUT} après {} Ko]\n", STDERR_CAP / 1000));
     }
     StepError {
         message,
