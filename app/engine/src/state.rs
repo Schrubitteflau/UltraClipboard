@@ -3,7 +3,7 @@
 use tokio::sync::watch;
 
 /// Numéro d'ordre d'une copie acceptée.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Ticket(u64);
 
 pub(crate) enum Registration {

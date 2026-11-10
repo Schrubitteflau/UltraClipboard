@@ -6,7 +6,7 @@
 
 use std::process::ExitCode;
 
-use engine::{ConfigState, Engine};
+use engine::{ConfigState, Engine, HistoryEntry};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Emitter, Manager, State, WindowEvent};
@@ -17,6 +17,8 @@ const MENU_OPEN: &str = "open";
 const MENU_QUIT: &str = "quit";
 /// Événement poussé à la fenêtre à chaque chargement de config ; porte un [`ConfigState`].
 const CONFIG_CHANGED: &str = "config-changed";
+/// Événement poussé à la fenêtre à chaque entrée d'historique ; porte l'historique entier.
+const HISTORY_CHANGED: &str = "history-changed";
 
 fn main() -> ExitCode {
     // Un seul runtime, partagé par le service D-Bus, le moteur et Tauri.
@@ -35,10 +37,11 @@ fn main() -> ExitCode {
         // La connexion vit aussi longtemps que l'appli : le service avec elle.
         .manage(conn)
         .manage(engine)
-        .invoke_handler(tauri::generate_handler![config_state, config_path])
+        .invoke_handler(tauri::generate_handler![config_state, config_path, history])
         .setup(|app| {
             add_tray(app)?;
             push_config_changes(app);
+            push_history_changes(app);
             Ok(())
         })
         // Fermer la fenêtre la cache ; seul « Quitter » arrête l'appli.
@@ -72,6 +75,24 @@ fn config_state(engine: State<'_, Engine>) -> ConfigState {
 #[tauri::command]
 fn config_path() -> Option<String> {
     ultraclipboard::config_path().map(|path| path.display().to_string())
+}
+
+/// Dernières transformations, la plus récente en tête (vue « Historique »).
+#[tauri::command]
+fn history(engine: State<'_, Engine>) -> Vec<HistoryEntry> {
+    engine.history()
+}
+
+/// Pousse [`HISTORY_CHANGED`] à la fenêtre à chaque entrée d'historique.
+fn push_history_changes(app: &App) {
+    let engine = app.state::<Engine>().inner().clone();
+    let mut changes = engine.history_changes();
+    let app = app.handle().clone();
+    tauri::async_runtime::spawn(async move {
+        while changes.changed().await.is_ok() {
+            let _ = app.emit(HISTORY_CHANGED, engine.history());
+        }
+    });
 }
 
 /// Pousse [`CONFIG_CHANGED`] à la fenêtre à chaque chargement de config.

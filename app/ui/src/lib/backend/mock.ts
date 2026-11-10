@@ -3,11 +3,13 @@
 //
 // Depuis la console du navigateur, `ucMock` simule ce que pousse l'appli :
 // `ucMock.pushConfig(ucMock.configs.refused)` (ou une autre clé de `ucMock.configs`, ou
-// un état écrit à la main).
+// un état écrit à la main) ; `ucMock.copy()` ajoute une entrée d'historique (ou
+// `ucMock.copy(ucMock.entries.failure)`, ou une entrée écrite à la main).
 
 import { mockIPC } from '@tauri-apps/api/mocks'
 import { emit } from '@tauri-apps/api/event'
 import { CONFIG_CHANGED, type ConfigState } from './config'
+import { HISTORY_CHANGED, type HistoryEntry, type UntimedEntry } from './history'
 
 const valid: ConfigState = {
   rules: [
@@ -62,9 +64,70 @@ const configs = {
 
 let config: ConfigState = configs.valid
 
+const youtubeRule = configs.valid.rules[0].pattern
+const numberRule = configs.valid.rules[1].pattern
+/** Il y a `minutes` minutes. */
+const ago = (minutes: number) => Date.now() - minutes * 60_000
+
+/** Une entrée de chaque sorte, sans l'heure. */
+const entries = {
+  success: {
+    rule: youtubeRule,
+    pipeline: 'youtube-markdown',
+    original: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    status: 'success',
+    result:
+      '[Faire son pain au levain](https://www.youtube.com/watch?v=dQw4w9WgXcQ) — [La Boulange](https://www.youtube.com/@laboulange)',
+  },
+  failure: {
+    rule: numberRule,
+    pipeline: 'clean',
+    original: ' 1 234,50 ',
+    status: 'failure',
+    step: 'command',
+    message: 'la commande a échoué (code de sortie 1)',
+    stderr:
+      'Traceback (most recent call last):\n  File "/home/moi/scripts/fix-numbers.py", line 4, in <module>\n    print(float(text))\nValueError: could not convert string to float: \'1 234,50\'\n',
+  },
+  empty: {
+    rule: numberRule,
+    pipeline: 'clean',
+    original: '   ',
+    status: 'failure',
+    step: null,
+    message: 'résultat vide',
+    stderr: '',
+  },
+  unchanged: {
+    rule: numberRule,
+    pipeline: 'clean',
+    original: '42',
+    status: 'success',
+    result: '42',
+  },
+  cancelled: {
+    rule: youtubeRule,
+    pipeline: 'youtube-markdown',
+    original: 'https://youtu.be/abc123',
+    status: 'cancelled',
+  },
+} satisfies Record<string, UntimedEntry>
+
+/** La plus récente en tête. */
+let historyEntries: HistoryEntry[] = [
+  { ...entries.success, at: ago(1) },
+  { ...entries.cancelled, at: ago(2) },
+  { ...entries.failure, at: ago(5) },
+  { ...entries.empty, at: ago(9) },
+  { ...entries.unchanged, at: ago(12) },
+  /** D'hier : la date s'affiche. */
+  { ...entries.success, at: ago(26 * 60) },
+]
+
 const commands: Record<string, (args?: unknown) => unknown> = {
   config_state: () => config,
   config_path: () => '/home/moi/.config/ultraclipboard/config.yaml',
+  history: () => historyEntries,
 }
 
 export function mockBackend() {
@@ -83,6 +146,17 @@ export function mockBackend() {
       pushConfig(state: ConfigState) {
         config = state
         return emit(CONFIG_CHANGED, state)
+      },
+      entries,
+      /** Simule une copie transformée : l'entrée (maintenant) passe en tête, 50 au plus. */
+      copy(entry: UntimedEntry = entries.success) {
+        historyEntries = [{ ...entry, at: Date.now() }, ...historyEntries].slice(0, 50)
+        return emit(HISTORY_CHANGED, historyEntries)
+      },
+      /** Simule un lancement : historique vide. */
+      clearHistory() {
+        historyEntries = []
+        return emit(HISTORY_CHANGED, historyEntries)
       },
     },
   })
