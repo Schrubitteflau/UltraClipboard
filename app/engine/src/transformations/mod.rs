@@ -4,7 +4,7 @@
 //! Transformation : en ajouter une, c'est un fichier et une ligne ici.
 
 mod case;
-mod command;
+pub(crate) mod command;
 mod trim;
 mod youtube;
 
