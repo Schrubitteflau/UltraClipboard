@@ -1,7 +1,10 @@
 # UltraClipboard
 
 Petit outil qui tourne en fond et transforme automatiquement ce que tu copies.
+Tu copies un lien plein de traqueurs (`?utm_source=…&fbclid=…`), tu colles le lien propre.
 Tu copies une URL YouTube, tu colles `[Titre](URL) — [Chaîne](URL de la chaîne)`.
+Ce ne sont que des exemples : les Règles sont les tiennes, et une Transformation peut lancer
+n'importe quel programme.
 
 Cible : **Ubuntu 26.04, GNOME, Wayland**. Rien d'autre pour l'instant.
 Vocabulaire : voir [GLOSSARY.md](GLOSSARY.md). Décisions structurantes : [docs/adr/](docs/adr/).
@@ -12,7 +15,8 @@ Vocabulaire : voir [GLOSSARY.md](GLOSSARY.md). Décisions structurantes : [docs/
 2. L'extension GNOME Shell voit la copie et l'envoie à l'appli (D-Bus).
 3. L'appli cherche la première **Règle** dont le motif correspond au texte.
    Aucune Règle ? Rien ne se passe.
-4. Elle exécute le **Pipeline** associé (Transformations en chaîne).
+4. Elle exécute le **Pipeline** associé (Transformations en chaîne) : quelques Transformations
+   intégrées, et `command` pour tout le reste (un script à toi, `sed`, `curl` vers un service…).
 5. Le résultat remplace le presse-papier, une notification le signale.
    Tu colles (Ctrl+V).
 
@@ -28,31 +32,35 @@ Comportements garantis :
 ## Configuration
 
 Un seul fichier : `~/.config/ultraclipboard/config.yaml`. Au premier lancement, s'il n'existe pas,
-il est créé avec une Règle YouTube d'exemple. Chaque enregistrement est pris en compte aussitôt,
-sans redémarrer.
+il est créé avec une Règle d'exemple, le « lien propre » ci-dessous (ni réseau ni outil à
+installer : seulement `sed`). Chaque enregistrement est pris en compte aussitôt, sans redémarrer.
 
 ```yaml
 config_version: 1           # obligatoire ; seule la version 1 existe
 notifications: all          # all | errors | off ; défaut all
 
 pipelines:
-  youtube-markdown:
-    - youtube:
-        template: "[{title}]({url}) — [{author_name}]({author_url})"
+  # https://exemple.fr/article?utm_source=lettre&fbclid=…  →  https://exemple.fr/article
+  lien-propre:
+    - trim
+    - command:
+        - sed
+        - -E
+        - 's/([?&])(utm_[a-z_]+|fbclid|gclid|igshid|mc_eid)=[^&#]*/\1/g; s/([?&])&+/\1/g; s/[?&]+(#|$)/\1/'
   clean:
     - trim
     - command: ["python3", "~/scripts/fix-numbers.py"]
       timeout: 10           # secondes, défaut 10
 
 rules:                      # la première Règle qui correspond gagne
-  - match: '^https?://(www\.)?(youtube\.com/watch|youtu\.be/)'
-    pipeline: youtube-markdown
+  - match: '^\s*https?://\S+[?&](utm_[a-z_]+|fbclid|gclid|igshid|mc_eid)=\S*\s*$'
+    pipeline: lien-propre
 ```
 
 - **`pipelines`** : des Pipelines nommés, chacun une liste d'étapes exécutées dans l'ordre.
   Une Transformation sans paramètre s'écrit par son nom (`- trim`) ; avec paramètres, comme une clé
-  (`- youtube: {template: …}`). `timeout` (en secondes, décimales acceptées) se met à côté, sur
-  `youtube` comme sur `command`.
+  (`- command: ["sed", "…"]`). `timeout` (en secondes, décimales acceptées) se met à côté, dans la
+  même étape.
 - **`rules`** : `match` est une expression régulière cherchée n'importe où dans le texte copié
   (ancrée seulement avec `^` / `$`), `pipeline` le nom d'un Pipeline.
 - **Config invalide** (YAML cassé, `config_version` absente ou inconnue, regex invalide, Pipeline
@@ -66,8 +74,10 @@ rules:                      # la première Règle qui correspond gagne
 |---|---|
 | `trim` | Retire les espaces en début et fin |
 | `upper` / `lower` | Majuscules / minuscules (Unicode) |
-| `youtube` | Récupère titre et chaîne de la vidéo via le service oEmbed de YouTube (sans clé d'API) et rend le `template` : `{title}`, `{url}` (l'URL copiée), `{author_name}`, `{author_url}`, `{thumbnail_url}` ; dans `{title}` et `{author_name}`, `\`, `[` et `]` sont échappés pour Markdown. Sans `template` : `[{title}]({url})`. Vidéo introuvable, réseau absent ou délai dépassé (10 s par défaut) = échec |
 | `command` | Lance un exécutable : texte copié sur l'entrée standard, résultat lu sur la sortie standard |
+
+Aucune Transformation n'est propre à un service : interroger YouTube, un taux de change ou ton
+outil de tickets, c'est une `command` (voir [l'exemple YouTube](#interroger-un-service--lexemple-youtube)).
 
 `command` en détail :
 
@@ -79,6 +89,34 @@ rules:                      # la première Règle qui correspond gagne
 - Sortie limitée à 8 Mo (au-delà : échec), sortie d'erreur coupée après 64 Ko.
 - Un processus lancé en arrière-plan doit rediriger ses sorties (`cmd >/dev/null 2>&1 &`),
   sinon l'étape l'attend jusqu'au délai.
+
+### Interroger un service : l'exemple YouTube
+
+Une URL YouTube copiée devient `[Titre](URL) — [Chaîne](URL de la chaîne)`. Titre et chaîne sont
+demandés au service oEmbed de YouTube (sans clé d'API) par `curl`, puis mis en forme par `jq` ;
+`\`, `[` et `]` y sont échappés pour Markdown. Il faut `curl` et `jq` (`sudo apt install curl jq`),
+et l'URL copiée est envoyée à YouTube.
+
+```yaml
+pipelines:
+  youtube-markdown:
+    - trim
+    - command:
+        - sh
+        - -c
+        - |
+          url=$(cat)
+          curl -fsS --get --data-urlencode "url=$url" --data-urlencode "format=json" https://www.youtube.com/oembed \
+            | jq -er --arg url "$url" 'def md: gsub("(?<c>[\\[\\]\\\\])"; "\\\(.c)"); "[\(.title | md)](\($url)) — [\(.author_name | md)](\(.author_url))"'
+
+rules:
+  - match: '^https?://(www\.)?(youtube\.com/watch|youtu\.be/)'
+    pipeline: youtube-markdown
+```
+
+Vidéo introuvable, réseau absent ou délai dépassé (10 s par défaut) = échec : le presse-papier
+n'est pas touché, et le message de `curl` est gardé dans l'historique. La réponse d'oEmbed porte
+aussi `thumbnail_url` : le format du résultat se change dans le filtre `jq`.
 
 ## Usage
 
@@ -221,14 +259,16 @@ install.sh   Vérifie les prérequis, compile, installe l'appli, l'extension et 
 ## Hors périmètre (pour l'instant)
 
 Windows/macOS, collage différé (le collage attend la fin de la Transformation), Ctrl+V+V,
-modules JS embarqués, écosystème de modules, édition de la config depuis la fenêtre,
+modules JS embarqués, écosystème de modules, Transformations propres à un service (YouTube et
+les autres passent par `command`), édition de la config depuis la fenêtre,
 détection de l'application de destination (impossible sous GNOME/Wayland).
 
 ## Ordre de construction
 
 1. Tranche verticale : copie → extension → D-Bus → Rust `upper` → presse-papier.
 2. Config YAML, Règles, Pipelines, `trim`, `upper`/`lower`, `command`.
-3. `youtube` + annulation « la dernière copie gagne ».
+3. Annulation « la dernière copie gagne », avec une Transformation `youtube` intégrée, retirée
+   depuis : tout appel à un service passe par `command`.
 4. Notifications, Original et raccourci de restauration.
 5. Fenêtre Svelte, puis icône et menu.
 

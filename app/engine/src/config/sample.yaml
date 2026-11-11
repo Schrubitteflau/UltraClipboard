@@ -5,11 +5,17 @@ config_version: 1            # obligatoire ; seule la version 1 existe
 notifications: all           # all | errors | off
 
 # Pipelines nommés : suites de Transformations appliquées l'une après l'autre.
-# Transformations : trim, upper, lower, youtube, command.
+# Transformations : trim, upper, lower, command.
+# `command` lance n'importe quel programme : texte copié sur son entrée
+# standard, résultat lu sur sa sortie standard.
 pipelines:
-  youtube-markdown:
-    - youtube:
-        template: "[{title}]({url}) — [{author_name}]({author_url})"
+  # https://exemple.fr/article?utm_source=lettre&fbclid=…  →  https://exemple.fr/article
+  lien-propre:
+    - trim
+    - command:
+        - sed
+        - -E
+        - 's/([?&])(utm_[a-z_]+|fbclid|gclid|igshid|mc_eid)=[^&#]*/\1/g; s/([?&])&+/\1/g; s/[?&]+(#|$)/\1/'
   # clean:
   #   - trim
   #   - command: ["python3", "~/scripts/fix-numbers.py"]
@@ -19,5 +25,5 @@ pipelines:
 # Règles : la première dont le motif (expression régulière) est trouvé dans le
 # texte copié applique son Pipeline ; aucune Règle = presse-papier intact.
 rules:
-  - match: '^https?://(www\.)?(youtube\.com/watch|youtu\.be/)'
-    pipeline: youtube-markdown
+  - match: '^\s*https?://\S+[?&](utm_[a-z_]+|fbclid|gclid|igshid|mc_eid)=\S*\s*$'
+    pipeline: lien-propre

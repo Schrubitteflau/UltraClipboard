@@ -16,7 +16,7 @@ use regex::Regex;
 use serde::Serialize;
 
 use crate::pipeline::Pipeline;
-use crate::transformations::{self, BuildError, Endpoints, Transformation};
+use crate::transformations::{self, BuildError, Transformation};
 use yaml::Value;
 
 /// Fichier d'exemple créé au premier lancement quand la config n'existe pas.
@@ -113,14 +113,8 @@ fn error(field: impl Into<String>, reason: impl Into<String>) -> ConfigError {
 }
 
 impl Config {
-    /// Lit et valide une config YAML ; les services en ligne sont les vrais.
+    /// Lit et valide une config YAML.
     pub fn parse(yaml: &str) -> Result<Self, ConfigError> {
-        Self::parse_with(yaml, &Endpoints::default())
-    }
-
-    /// Lit et valide une config YAML dont les Transformations appellent ces
-    /// services (les tests y mettent un faux service local).
-    pub fn parse_with(yaml: &str, endpoints: &Endpoints) -> Result<Self, ConfigError> {
         let root: Value = serde_saphyr::from_str(yaml)
             .map_err(|err| error("", format!("YAML invalide : {err}")))?;
         let root = match root {
@@ -141,7 +135,7 @@ impl Config {
             }
         }
         let notifications = parse_notifications(field(&root, "notifications"))?;
-        let (pipelines, built) = parse_pipelines(field(&root, "pipelines"), endpoints)?;
+        let (pipelines, built) = parse_pipelines(field(&root, "pipelines"))?;
         let rules = parse_rules(field(&root, "rules"), &built)?;
         Ok(Self {
             notifications,
@@ -223,7 +217,7 @@ fn parse_notifications(value: Option<&Value>) -> Result<Notifications, ConfigErr
 /// Pipelines tels qu'écrits (dans l'ordre du fichier) et construits (par nom).
 type Pipelines = (Vec<NamedPipeline>, HashMap<String, Arc<Pipeline>>);
 
-fn parse_pipelines(value: Option<&Value>, endpoints: &Endpoints) -> Result<Pipelines, ConfigError> {
+fn parse_pipelines(value: Option<&Value>) -> Result<Pipelines, ConfigError> {
     let entries = match value {
         None | Some(Value::Null) => return Ok(Default::default()),
         Some(Value::Map(entries)) => entries,
@@ -263,7 +257,7 @@ fn parse_pipelines(value: Option<&Value>, endpoints: &Endpoints) -> Result<Pipel
         let (steps, built): (Vec<_>, Vec<_>) = steps
             .iter()
             .enumerate()
-            .map(|(i, step)| parse_step(&format!("{path}[{i}]"), step, endpoints))
+            .map(|(i, step)| parse_step(&format!("{path}[{i}]"), step))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .unzip();
@@ -277,11 +271,7 @@ fn parse_pipelines(value: Option<&Value>, endpoints: &Endpoints) -> Result<Pipel
 }
 
 /// Une étape : `nom`, ou `nom: paramètres` avec un `timeout` facultatif à côté.
-fn parse_step(
-    path: &str,
-    step: &Value,
-    endpoints: &Endpoints,
-) -> Result<(Step, Box<dyn Transformation>), ConfigError> {
+fn parse_step(path: &str, step: &Value) -> Result<(Step, Box<dyn Transformation>), ConfigError> {
     let mut written_timeout = None;
     let (name, params, timeout) = match step {
         Value::Str(name) => (name.as_str(), &Value::Null, None),
@@ -327,19 +317,18 @@ fn parse_step(
         transformation: name.to_owned(),
         params: written.join(", "),
     };
-    let built =
-        transformations::build(name, params, timeout, endpoints).map_err(|err| match err {
-            BuildError::Unknown => error(path, format!("Transformation inconnue « {name} »")),
-            BuildError::Params { field, reason } => {
-                let mut at = format!("{path}.{name}");
-                if field.starts_with('[') {
-                    at = format!("{at}{field}");
-                } else if !field.is_empty() {
-                    at = format!("{at}.{field}");
-                }
-                error(at, reason)
+    let built = transformations::build(name, params, timeout).map_err(|err| match err {
+        BuildError::Unknown => error(path, format!("Transformation inconnue « {name} »")),
+        BuildError::Params { field, reason } => {
+            let mut at = format!("{path}.{name}");
+            if field.starts_with('[') {
+                at = format!("{at}{field}");
+            } else if !field.is_empty() {
+                at = format!("{at}.{field}");
             }
-        })?;
+            error(at, reason)
+        }
+    })?;
     Ok((written, built))
 }
 

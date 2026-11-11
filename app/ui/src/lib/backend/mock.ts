@@ -20,9 +20,11 @@ const valid: ConfigState = {
     {
       name: 'youtube-markdown',
       steps: [
+        { transformation: 'trim', params: '' },
         {
-          transformation: 'youtube',
-          params: 'template: "[{title}]({url}) — [{author_name}]({author_url})"',
+          transformation: 'command',
+          params:
+            '["sh", "-c", "url=$(cat)\\ncurl -fsS --get --data-urlencode \\"url=$url\\" --data-urlencode \\"format=json\\" https://www.youtube.com/oembed | jq -er --arg url \\"$url\\" \'\\"[\\\\(.title)](\\\\($url)) — [\\\\(.author_name)](\\\\(.author_url))\\"\'\\n"]',
         },
       ],
     },

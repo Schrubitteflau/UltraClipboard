@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 mod common;
 
 use common::{pids, pids_written_to, scratch, wait_dead};
-use engine::{Config, ConfigError, Engine, Failure, Outcome};
+use engine::{Config, ConfigError, Engine, Failure, Outcome, SAMPLE_CONFIG, Skip};
 
 /// Moteur dont l'unique Règle applique à toute copie le Pipeline `steps`
 /// (étapes YAML en style bloc, une par ligne, indentées de quatre espaces).
@@ -24,6 +24,38 @@ fn write(text: &str) -> Outcome {
 async fn the_text_goes_in_on_stdin_and_the_result_comes_from_stdout() {
     let engine = engine_with("    - command: [sh, -c, 'printf \"<%s>\" \"$(cat)\"']");
     assert_eq!(engine.on_copy("abc").await, write("<abc>"));
+}
+
+#[tokio::test]
+async fn the_sample_config_strips_trackers_from_a_copied_link() {
+    let engine = Engine::new(Config::parse(SAMPLE_CONFIG).unwrap());
+    for (copied, cleaned) in [
+        (
+            "https://exemple.fr/article?utm_source=lettre&fbclid=abc",
+            "https://exemple.fr/article",
+        ),
+        (
+            " https://exemple.fr/p?id=3&utm_medium=mail&page=2#titre\n",
+            "https://exemple.fr/p?id=3&page=2#titre",
+        ),
+        (
+            "https://exemple.fr/p?gclid=1&id=3",
+            "https://exemple.fr/p?id=3",
+        ),
+    ] {
+        assert_eq!(engine.on_copy(copied).await, write(cleaned), "{copied:?}");
+    }
+    // Un lien sans traqueur, ou un texte qui n'est pas un lien, n'est pas touché.
+    for untouched in [
+        "https://exemple.fr/autre?id=4",
+        "voir https://exemple.fr/p?utm_source=lettre demain",
+    ] {
+        assert_eq!(
+            engine.on_copy(untouched).await,
+            Outcome::Nothing(Skip::NoRule),
+            "{untouched:?}"
+        );
+    }
 }
 
 #[tokio::test]

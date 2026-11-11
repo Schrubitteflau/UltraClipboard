@@ -25,7 +25,6 @@ pub use config::{Config, ConfigError, NamedPipeline, Notifications, Rule, SAMPLE
 pub use history::{HISTORY_CAP, HistoryEntry, HistoryStatus, TEXT_CAP};
 pub use notify::Notification;
 pub use pipeline::Failure;
-pub use transformations::Endpoints;
 
 use history::History;
 use notify::Notifier;
@@ -399,8 +398,8 @@ impl Engine {
                 return Outcome::Nothing(Skip::NoRule);
             };
             // Une copie plus récente arrête le Pipeline sur place : l'étape en
-            // cours est abandonnée (processus d'une `command` tué, requête
-            // `youtube` coupée) et les suivantes ne tournent pas.
+            // cours est abandonnée (processus d'une `command` tué) et les
+            // suivantes ne tournent pas.
             let result = tokio::select! {
                 result = pipeline.run(&text) => Some(result),
                 () = superseded.wait() => None,
