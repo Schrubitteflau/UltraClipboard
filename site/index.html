@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<title>UltraClipboard</title>
+<meta name="description" content="Tu copies, il transforme, tu colles. UltraClipboard réécrit ce que tu copies selon tes règles : un calcul devient son résultat, des dollars des euros, une URL son titre. Pour GNOME sous Wayland.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="UltraClipboard">
+<meta property="og:description" content="Tu copies, il transforme, tu colles. Un service d'arrière-plan qui réécrit ton presse-papier selon tes règles, sous GNOME.">
+<meta property="og:url" content="https://ultraclipboard.antoine.computer/">
+<meta property="og:image" content="https://ultraclipboard.antoine.computer/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="fr_FR">
+<link rel="canonical" href="https://ultraclipboard.antoine.computer/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" as="font" href="fonts/instrument-serif.woff2" type="font/woff2" crossorigin>
+<link rel="preload" as="font" href="fonts/geist.woff2" type="font/woff2" crossorigin>
+<link rel="preload" as="image" href="assets/ascii-mains.webp" type="image/webp">
+<style>
+@font-face{font-family:"Instrument Serif";font-style:normal;font-weight:400;font-display:swap;src:url("fonts/instrument-serif.woff2") format("woff2")}
+@font-face{font-family:"Instrument Serif";font-style:italic;font-weight:400;font-display:swap;src:url("fonts/instrument-serif-italic.woff2") format("woff2")}
+@font-face{font-family:"Geist";font-style:normal;font-weight:400 600;font-display:swap;src:url("fonts/geist.woff2") format("woff2")}
+@font-face{font-family:"Geist Mono";font-style:normal;font-weight:400 600;font-display:swap;src:url("fonts/geist-mono.woff2") format("woff2")}
+
+/* Univers « Nocturne » : noir plein, papier crème.
+   Pervenche = ce que tu copies (et l'accent de la page).
+   Braise    = ce qui en sort, transformé. Nulle part ailleurs. */
+:root{
+  color-scheme:dark;
+  --ink:#000; --ink-2:#0a0a0b; --ink-3:#131315;
+  --line:rgba(237,234,228,.12); --line-2:rgba(237,234,228,.24);
+  --paper:#edeae4; --muted:#9a978f; --faint:#62605b;
+  --iris:#9aa2e8; --iris-wash:rgba(154,162,232,.36);
+  --ember:#ec7a52;
+  --serif:"Instrument Serif","Iowan Old Style",Georgia,serif;
+  --sans:"Geist",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,"JetBrains Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;background:var(--ink)}
+body{margin:0;background:var(--ink);color:var(--paper);font:16.5px/1.62 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:clip}
+::selection{background:var(--iris);color:#000}
+code,pre,kbd{font-family:var(--mono)}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--iris);outline-offset:3px}
+img{display:block;max-width:100%;height:auto}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.page{overflow-x:clip}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px}
+
+/* ---------- nav ---------- */
+nav{display:flex;align-items:center;justify-content:space-between;padding:22px 0;position:relative;z-index:5}
+.brand{display:flex;align-items:center;gap:11px;text-decoration:none;font:400 25px/1 var(--serif)}
+.brand svg{width:24px;height:24px;flex:none}
+.nav-links{display:flex;gap:26px;align-items:center;font:500 12px var(--mono);letter-spacing:.09em;text-transform:uppercase}
+.nav-links a{text-decoration:none;color:var(--muted);transition:color .15s ease}
+.nav-links a:hover{color:var(--paper)}
+.gh-pill{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line-2);padding:8px 13px;border-radius:3px;color:var(--paper)!important}
+.gh-pill:hover{border-color:var(--paper)}
+.gh-pill svg{width:15px;height:15px}
+
+/* ---------- hero ---------- */
+.hero{display:grid;grid-template-columns:minmax(0,540px) minmax(0,1fr);gap:24px;align-items:center;padding:56px 0 40px;position:relative}
+.hero-text{position:relative;z-index:2}
+.kicker{margin:0;font:500 11.5px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+h1{font:400 clamp(58px,8.4vw,104px)/.93 var(--serif);letter-spacing:-.022em;margin:26px 0 28px}
+h1 em{font-style:italic;color:var(--ember);padding-right:.04em}
+.lead{max-width:500px;margin:0;color:var(--muted);font-size:clamp(16.5px,1.5vw,18px)}
+.lead strong{color:var(--paper);font-weight:500}
+.ctas{display:flex;gap:12px;flex-wrap:wrap;margin-top:34px}
+.btn{display:inline-flex;align-items:center;gap:10px;padding:13px 20px;border-radius:3px;font:500 13px var(--mono);letter-spacing:.06em;text-transform:uppercase;text-decoration:none;border:1px solid transparent;transition:background .15s ease,border-color .15s ease}
+.btn svg{width:16px;height:16px}
+.btn-primary{background:var(--paper);color:#000}
+.btn-primary:hover{background:var(--iris)}
+.btn-ghost{border-color:var(--line-2);color:var(--paper)}
+.btn-ghost:hover{border-color:var(--paper)}
+
+.hands{margin:0 0 0 -6%;position:relative;width:164%;aspect-ratio:1640/990;z-index:1;
+  -webkit-mask-image:linear-gradient(90deg,#000 58%,transparent 96%);mask-image:linear-gradient(90deg,#000 58%,transparent 96%)}
+.hands img{width:100%;height:100%}
+.held{position:absolute;display:grid;gap:7px;font-family:var(--mono);transition:opacity .35s ease}
+.held-k{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.held-t{font-size:15px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(290px,34vw);opacity:0;transition:opacity .35s ease}
+.held-t.on{opacity:1}
+.held-c{left:40.5%;bottom:63%}
+.held-c .held-t{color:var(--paper);justify-self:start;padding:1px 5px;margin-left:-5px;border-radius:2px;background:var(--iris-wash)}
+.held-v{right:66%;top:64%;justify-items:end;text-align:right}
+.held-v .held-t{color:var(--ember)}
+.spark{position:absolute;left:36.9%;top:49.6%;width:0;height:0}
+.spark::before{content:"";position:absolute;width:150px;height:150px;left:-75px;top:-75px;border-radius:50%;background:radial-gradient(circle,rgba(236,122,82,.34),rgba(236,122,82,.09) 38%,transparent 68%);opacity:.55;transition:opacity .5s ease,transform .5s ease}
+.spark::after{content:"";position:absolute;width:9px;height:9px;left:-4.5px;top:-4.5px;background:var(--ember);transform:rotate(45deg);transition:transform .5s ease}
+.spark.flash::before{opacity:1;transform:scale(1.3)}
+.spark.flash::after{transform:rotate(45deg) scale(1.7)}
+
+/* ---------- sections ---------- */
+section{padding:128px 0 0}
+.label{margin:0;font:500 11.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+h2{font:400 clamp(36px,5vw,60px)/1.03 var(--serif);letter-spacing:-.018em;margin:18px 0 20px;max-width:17em}
+h3{font:400 27px/1.12 var(--serif);letter-spacing:-.008em;margin:0 0 8px}
+.sub{color:var(--muted);max-width:600px;margin:0 0 40px}
+.sub code,.note code,.steps code,.limits code{color:var(--paper);font-size:.86em;border:1px solid var(--line);padding:1px 6px;border-radius:3px}
+.sub a,.note a,.install a{color:var(--paper);text-decoration-color:var(--iris);text-underline-offset:3px}
+kbd.k{font:500 11.5px var(--mono);padding:2px 6px;border-radius:3px;border:1px solid var(--line-2);color:var(--paper);white-space:nowrap}
+
+/* ---------- démo ---------- */
+.demo-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px 40px;flex-wrap:wrap;margin-bottom:30px}
+.demo-head .sub{margin:0}
+.tabs{display:flex;border:1px solid var(--line-2);border-radius:4px;overflow:hidden;flex:none}
+.tab{font:500 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:11px 16px;border:0;border-right:1px solid var(--line-2);background:transparent;color:var(--muted);cursor:pointer;transition:color .15s ease,background .15s ease}
+.tab:last-child{border-right:0}
+.tab:hover{color:var(--paper)}
+.tab[aria-pressed="true"]{color:#000;background:var(--paper)}
+.desk{position:relative;border-radius:10px;background:#000 url("assets/nocturne-colline.webp") center 38%/cover no-repeat;overflow:hidden;border:1px solid var(--line-2);isolation:isolate}
+.desk::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.3),rgba(0,0,0,.08) 40%,rgba(0,0,0,.4));z-index:-1}
+.topbar{display:flex;justify-content:space-between;align-items:center;height:30px;padding:0 14px;background:rgba(0,0,0,.62);font:500 12px var(--sans);position:relative}
+.topbar .clock{position:absolute;left:50%;transform:translateX(-50%);white-space:nowrap}
+.tray{display:flex;gap:11px;align-items:center;margin-left:auto}
+.tray svg{width:15px;height:15px;opacity:.9}
+.stage{padding:84px 34px 44px;display:grid;gap:16px;min-height:470px;align-content:start}
+.win{background:rgba(9,9,10,.76);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-radius:8px;overflow:hidden;box-shadow:0 24px 50px -18px rgba(0,0,0,.9);border:1px solid rgba(237,234,228,.16)}
+.win.src{width:min(100%,640px)}
+.win.dst{width:min(100%,700px);margin-left:auto}
+.win-bar{display:flex;align-items:center;gap:8px;height:32px;padding:0 12px;background:rgba(237,234,228,.05);border-bottom:1px solid rgba(237,234,228,.08);font:400 11.5px var(--mono);color:var(--muted)}
+.win-bar .t{flex:1;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:39px}
+.dots{display:flex;gap:6px}
+.dots i{width:9px;height:9px;border-radius:50%;border:1px solid var(--faint);display:block}
+.win-body{padding:16px 18px;font:400 13.5px/1.7 var(--mono);min-height:62px;word-break:break-word}
+.selbox{padding:1px 2px;border-radius:2px;background-image:linear-gradient(var(--iris-wash),var(--iris-wash));background-repeat:no-repeat;background-size:0% 100%;transition:background-size .7s cubic-bezier(.6,0,.2,1);white-space:pre-wrap;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.selbox.on{background-size:100% 100%}
+.flow{display:flex;justify-content:center;min-height:36px;opacity:0;transform:translateY(-4px);transition:opacity .3s ease,transform .3s ease}
+.flow.on{opacity:1;transform:none}
+.chip{font:400 12.5px var(--mono);padding:6px 12px;border-radius:3px;background:rgba(0,0,0,.76);border:1px solid rgba(237,234,228,.2);color:var(--muted);transition:color .25s ease,border-color .25s ease,background .25s ease}
+.chip b{font-weight:500;color:var(--paper);transition:color .25s ease}
+.chip.run{border-color:var(--iris)}
+.chip.ok{border-color:var(--ember)}
+.chip.ok b{color:var(--ember)}
+.dst .win-body{min-height:96px;white-space:pre-wrap}
+.pre{color:var(--muted)}
+#dstText{color:var(--ember)}
+.caret{display:inline-block;width:7px;height:1.1em;vertical-align:-.2em;background:var(--paper);margin-left:1px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.toast{position:absolute;top:40px;left:50%;width:min(310px,calc(100% - 32px));transform:translate(-50%,-160%);opacity:0;background:rgba(19,19,21,.94);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border:1px solid rgba(237,234,228,.18);border-radius:10px;padding:9px 14px 10px;box-shadow:0 20px 40px -15px rgba(0,0,0,.9);transition:transform .45s cubic-bezier(.2,1.3,.4,1),opacity .25s ease;z-index:3}
+.toast.on{transform:translate(-50%,0);opacity:1}
+.toast small{display:flex;align-items:center;gap:7px;font:400 11px var(--sans);color:var(--muted)}
+.toast small svg{width:12px;height:12px}
+.toast b{display:block;font:500 13px var(--sans);margin-top:2px}
+.keys{position:absolute;right:26px;bottom:24px;display:flex;gap:6px;z-index:2;pointer-events:none}
+.key{font:600 13px var(--mono);padding:9px 13px;border-radius:5px;background:var(--paper);color:#000;border-bottom:4px solid #8f8c86;box-shadow:0 10px 24px -8px rgba(0,0,0,.9);opacity:0;transform:translateY(10px) scale(.9);transition:all .2s ease}
+.keys.on .key{opacity:1;transform:none}
+.keys.press .key{transform:translateY(3px);border-bottom-width:1px}
+
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:0 36px;margin-top:34px}
+.step{padding-top:20px;border-top:1px solid var(--line-2);transition:border-color .3s ease}
+.step h3{color:var(--muted);transition:color .3s ease}
+.step p{margin:0;color:var(--muted);font-size:15.5px}
+.step.on{border-color:var(--paper)}
+.step.on h3{color:var(--paper)}
+
+/* ---------- recettes ---------- */
+.group{margin:44px 0 0;font:500 11.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);padding-bottom:12px;border-bottom:1px solid var(--line-2)}
+.recipe{border-bottom:1px solid var(--line)}
+.recipe summary{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) auto;gap:8px 28px;align-items:center;padding:20px 0;cursor:pointer;list-style:none}
+.recipe summary::-webkit-details-marker{display:none}
+.r-name{font:400 25px/1.15 var(--serif)}
+.r-name small{display:block;font:400 14px/1.5 var(--sans);color:var(--muted);margin-top:5px;max-width:34em}
+.r-pair{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font:400 13.5px/1.6 var(--mono);min-width:0}
+.r-pair code{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r-pair .in{color:var(--paper);background:var(--iris-wash);padding:1px 6px;border-radius:2px}
+.r-pair .out{color:var(--ember)}
+.r-pair svg{width:16px;height:16px;flex:none;color:var(--faint)}
+.r-more{display:inline-flex;align-items:center;gap:7px;font:500 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);transition:color .15s ease}
+.recipe summary:hover .r-more{color:var(--paper)}
+.r-more svg{width:12px;height:12px;transition:transform .2s ease}
+.recipe[open] .r-more svg{transform:rotate(180deg)}
+.r-body{position:relative;margin:0 0 22px;border:1px solid var(--line-2);border-radius:6px;background:var(--ink-2)}
+.r-body pre{margin:0;padding:18px 20px;font-size:12.5px;line-height:1.7;color:#c9c5bd;overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--faint) transparent}
+.r-body .copy{position:absolute;top:10px;right:10px}
+.copy{font:500 11.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:9px 13px;border-radius:3px;border:0;background:var(--paper);color:#000;cursor:pointer;min-width:84px;transition:background .15s ease}
+.copy:hover{background:var(--iris)}
+.note{color:var(--muted);font-size:15px;margin:26px 0 0;max-width:640px}
+
+/* ---------- config ---------- */
+.split{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:48px;align-items:start}
+.codebox{border:1px solid var(--line-2);border-radius:6px;background:var(--ink-2);overflow:hidden}
+.codebox .file{padding:11px 16px;border-bottom:1px solid var(--line);font:400 11.5px var(--mono);color:var(--muted)}
+.code{margin:0;padding:20px 20px 22px;font-size:12.5px;line-height:1.75;overflow-x:auto;color:#c9c5bd;scrollbar-width:thin;scrollbar-color:var(--faint) transparent}
+.code .c{color:var(--faint)} .code .k{color:var(--iris)} .code .p{color:var(--paper);font-weight:500}
+.tx{margin:0}
+.tx .main{padding:0 0 26px;border-bottom:1px solid var(--line-2)}
+.tx .main dt{font:500 15px var(--mono);color:var(--paper);margin-bottom:10px}
+.tx .main dd{margin:0;color:var(--muted);font-size:15.5px}
+.tx .main dd strong{color:var(--paper);font-weight:500}
+.tx .also{margin:22px 0 4px;font:500 11.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.tx .row{display:grid;grid-template-columns:104px 1fr;gap:14px;align-items:baseline;padding:14px 0;border-bottom:1px solid var(--line)}
+.tx .row dt{font:500 13.5px var(--mono);color:var(--paper)}
+.tx .row dd{margin:0;color:var(--muted);font-size:15px}
+
+/* ---------- confiance ---------- */
+.trust{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:56px;align-items:center}
+.halo{margin:0 0 0 -12%}
+.halo img{width:100%;-webkit-mask-image:radial-gradient(60% 64% at 50% 44%,#000 60%,transparent 100%);mask-image:radial-gradient(60% 64% at 50% 44%,#000 60%,transparent 100%)}
+.facts{margin:36px 0 0;border-top:1px solid var(--line-2)}
+.facts div{padding:20px 0;border-bottom:1px solid var(--line)}
+.facts dt{font:400 25px/1.15 var(--serif);margin-bottom:6px}
+.facts dd{margin:0;color:var(--muted);font-size:15.5px}
+.facts dd strong{color:var(--paper);font-weight:500}
+.under{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:56px;margin-top:72px;align-items:start}
+.menu{margin:0;justify-self:center;width:min(100%,250px)}
+.menu ul{list-style:none;margin:0;padding:6px;background:var(--ink-3);border:1px solid var(--line-2);border-radius:12px;font:400 14px var(--sans)}
+.menu li{padding:8px 12px;border-radius:7px}
+.menu li.hl{background:rgba(237,234,228,.09)}
+.menu li.sep{height:1px;padding:0;margin:6px 8px;background:var(--line)}
+.menu figcaption{margin-top:12px;text-align:center;font:400 10.5px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.limits ul{list-style:none;margin:18px 0 0;padding:0;border-top:1px solid var(--line-2)}
+.limits li{padding:14px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:15.5px}
+.limits li strong{color:var(--paper);font-weight:500}
+
+/* ---------- installation ---------- */
+.install ol{list-style:none;margin:0;padding:0;counter-reset:etape;border-top:1px solid var(--line-2)}
+.install li{counter-increment:etape;display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:14px 56px;padding:28px 0;border-bottom:1px solid var(--line)}
+.install h3::before{content:counter(etape) ". ";color:var(--faint)}
+.install li p{margin:0;color:var(--muted);font-size:15.5px}
+.install li p + .cmd{margin-top:16px}
+.cmd{display:flex;align-items:flex-start;gap:12px;background:var(--ink-2);border-radius:6px;padding:6px 6px 6px 16px;border:1px solid var(--line-2)}
+.cmd code{flex:1;min-width:0;font-size:12.5px;line-height:1.65;padding:7px 0;overflow-wrap:anywhere}
+.cmd code::before{content:"$ ";color:var(--faint)}
+
+footer{margin-top:120px;padding:26px 0 44px;border-top:1px solid var(--line);color:var(--muted);font:400 12px var(--mono);display:flex;justify-content:space-between;gap:14px 28px;flex-wrap:wrap}
+footer .ramp{color:var(--faint);letter-spacing:.35em;user-select:none}
+footer a{text-decoration:none}
+footer a:hover{color:var(--paper)}
+
+@media (max-width:980px){
+  .hero{grid-template-columns:1fr;padding-top:36px;gap:0}
+  .hands{width:150%;margin:20px 0 0 -8%}
+  .held-t{max-width:46vw}
+  .split,.trust,.under{grid-template-columns:1fr}
+  .trust{gap:20px}
+  .halo{margin:0 -4%;max-width:520px}
+  .under{gap:48px;margin-top:56px}
+  .install li{grid-template-columns:1fr}
+}
+@media (max-width:820px){
+  .wrap{padding:0 16px}
+  section{padding-top:96px}
+  .nav-links .hide-sm{display:none}
+  .held-k{font-size:9.5px}
+  .held-t{font-size:12.5px}
+  .held{gap:4px}
+  .spark::before{width:90px;height:90px;left:-45px;top:-45px}
+  .tabs{width:100%}
+  .tab{flex:1;padding:11px 6px}
+  .stage{padding:76px 14px 64px;min-height:440px}
+  .topbar .act{display:none}
+  .keys{right:14px;bottom:14px}
+  .win-body{font-size:12px;padding:12px 14px}
+  .steps{grid-template-columns:1fr;gap:22px}
+  .recipe summary{grid-template-columns:minmax(0,1fr) auto;padding:18px 0}
+  .r-pair{grid-column:1/-1;grid-row:2}
+  .r-more span{display:none}
+  .r-body .copy{position:static;margin:10px 10px 0;float:right}
+  .r-body pre{clear:both}
+  .tx .row{grid-template-columns:1fr;gap:4px}
+}
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="logo" viewBox="-40 -40 80 80"><path d="M-32-8v-24h24" fill="none" stroke="#9aa2e8" stroke-width="8" stroke-linecap="square"/><path d="M32 8v24H8" fill="none" stroke="#edeae4" stroke-width="8" stroke-linecap="square"/><rect x="-9.5" y="-9.5" width="19" height="19" fill="#ec7a52" transform="rotate(45)"/></symbol>
+  <symbol id="logo-mono" viewBox="-40 -40 80 80"><path d="M-32-8v-24h24M32 8v24H8" fill="none" stroke="currentColor" stroke-width="9" stroke-linecap="square"/><rect x="-10" y="-10" width="20" height="20" fill="currentColor" transform="rotate(45)"/></symbol>
+  <symbol id="arrow" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="chev" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="gh" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+</svg>
+
+<div class="page">
+<div class="wrap">
+  <nav>
+    <a class="brand" href="#"><svg aria-hidden="true"><use href="#logo"/></svg>UltraClipboard</a>
+    <div class="nav-links">
+      <a class="hide-sm" href="#recettes">Recettes</a>
+      <a class="hide-sm" href="#config">Config</a>
+      <a class="hide-sm" href="#install">Installer</a>
+      <a class="gh-pill" href="https://github.com/Schrubitteflau/UltraClipboard"><svg aria-hidden="true"><use href="#gh"/></svg>GitHub</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-text">
+      <p class="kicker">Service d'arrière-plan · Extension GNOME Shell · Ubuntu 26.04</p>
+      <h1>Tu copies.<br><em>Il transforme.</em><br>Tu colles.</h1>
+      <p class="lead">UltraClipboard tourne en fond. Quand un texte que tu copies correspond à l'une de tes règles, il le remplace par ce que tu voulais vraiment coller : un calcul par son résultat, des dollars par des euros, une URL par son titre. <strong>Une règle, c'est une regex et le programme de ton choix.</strong></p>
+      <div class="ctas">
+        <a class="btn btn-primary" href="#install">Installer</a>
+        <a class="btn btn-ghost" href="#recettes">Voir les recettes</a>
+      </div>
+    </div>
+
+    <figure class="hands">
+      <img src="assets/ascii-mains.webp" alt="" width="1640" height="990" fetchpriority="high">
+      <div class="held held-c" aria-hidden="true"><span class="held-k">Tu copies</span><span class="held-t on" id="heldIn">128 * 12 =</span></div>
+      <span class="spark" id="spark" aria-hidden="true"></span>
+      <div class="held held-v" aria-hidden="true"><span class="held-k">Tu colles</span><span class="held-t on" id="heldOut">1536</span></div>
+      <figcaption class="sr">Exemples : « 128 * 12 = » devient « 1536 » ; « 49 $ » devient « 43,70 € » ; « 3pm PST » devient « 00:00 (heure de Paris) » ; une URL YouTube devient un lien Markdown avec le titre de la vidéo.</figcaption>
+    </figure>
+  </header>
+
+  <section id="comment">
+    <div class="demo-head">
+      <div>
+        <p class="label">Comment ça marche</p>
+        <h2>Rien à apprendre. Tu copies comme d'habitude.</h2>
+        <p class="sub">Une extension GNOME Shell voit chaque copie et la confie à un service qui tourne en fond. Si une de tes règles reconnaît le texte, le résultat remplace le presse-papier avant que tu colles.</p>
+      </div>
+      <div class="tabs" id="tabs" role="group" aria-label="Choisir un exemple"></div>
+    </div>
+
+    <div class="desk" id="desk" role="img" aria-label="Démonstration animée : un texte copié dans une fenêtre est transformé, puis collé dans une autre">
+      <div class="topbar">
+        <span class="act">Activités</span>
+        <span class="clock">mar. 10 nov.  23:32</span>
+        <span class="tray">
+          <svg aria-hidden="true"><use href="#logo-mono"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M2 9a15 15 0 0120 0M5.5 12.5a10 10 0 0113 0M9 16a5 5 0 016 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M16 9a4.5 4.5 0 010 6M19 6.5a8.5 8.5 0 010 11" stroke-linecap="round"/></svg>
+        </span>
+      </div>
+
+      <div class="toast" id="toast">
+        <small><svg aria-hidden="true"><use href="#logo-mono"/></svg>UltraClipboard</small>
+        <b id="toastTitle">✓ calcul</b>
+      </div>
+
+      <div class="stage">
+        <div class="win src">
+          <div class="win-bar"><div class="dots"><i></i><i></i><i></i></div><span class="t" id="srcTitle"></span></div>
+          <div class="win-body"><span class="selbox" id="srcText"></span></div>
+        </div>
+        <div class="flow" id="flow"><span class="chip" id="chip">pipeline <b id="chipName"></b></span></div>
+        <div class="win dst">
+          <div class="win-bar"><div class="dots"><i></i><i></i><i></i></div><span class="t" id="dstTitle"></span></div>
+          <div class="win-body"><span class="pre" id="dstPre"></span><span id="dstText"></span><span class="caret"></span></div>
+        </div>
+      </div>
+
+      <div class="keys" id="keys"><span class="key">Ctrl</span><span class="key" id="keyLetter">C</span></div>
+    </div>
+
+    <div class="steps">
+      <div class="step" id="step1"><h3>Tu copies</h3><p><kbd class="k">Ctrl</kbd> + <kbd class="k">C</kbd>, n'importe où : navigateur, terminal, messagerie.</p></div>
+      <div class="step" id="step2"><h3>Une règle reconnaît le texte</h3><p>La première règle dont le motif correspond lance son pipeline. Aucune ne correspond ? Il ne se passe rien.</p></div>
+      <div class="step" id="step3"><h3>Tu colles le résultat</h3><p>Une notification confirme. <kbd class="k">Super</kbd> + <kbd class="k">Shift</kbd> + <kbd class="k">V</kbd> remet l'original si tu changes d'avis.</p></div>
+    </div>
+  </section>
+
+  <section id="recettes">
+    <p class="label">Recettes</p>
+    <h2>Neuf règles prêtes à copier.</h2>
+    <p class="sub">Une recette, c'est une règle et son pipeline. Copie celles qui te servent dans ta config, ou écris les tiennes : tout programme qui lit un texte et en rend un autre fait l'affaire.</p>
+
+    <p class="group">Pour tout le monde</p>
+
+    <details class="recipe">
+      <summary>
+        <span class="r-name">Un calcul<small>Le signe <code>=</code> à la fin sert de déclencheur. Sans lui, rien ne bouge.</small></span>
+        <span class="r-pair"><code class="in">128 * 12 =</code><svg aria-hidden="true"><use href="#arrow"/></svg><code class="out">1536</code></span>
+        <span class="r-more"><span>Recette</span><svg aria-hidden="true"><use href="#chev"/></svg></span>
+      </summary>
+      <div class="r-body"><button class="copy" type="button" data-copy="r-calcul">Copier</button>
+<pre id="r-calcul">pipelines:
+  calcul:
+    - command:
+        - sh
+        - -c
+        - |
+          { echo 'scale=2'; tr -d '= ' | tr ',' '.'; echo; } | bc | tr '.' ','
+
+rules:
+  - match: '^\s*[\d\s.,()+*/-]*\d[\d\s.,()]*[+*/-][\d\s.,()+*/-]*\d[\s)]*=\s*$'
+    pipeline: calcul</pre></div>
+    </details>
+
+    <details class="recipe">
+      <summary>
+        <span class="r-name">Des dollars en euros<small>Passe par le réseau : le montant, et lui seul, est envoyé à frankfurter.dev, qui publie les taux des banques centrales.</small></span>
+        <span class="r-pair"><code class="in">49 $</code><svg aria-hidden="true"><use href="#arrow"/></svg><code class="out">43,70 €</code></span>
+        <span class="r-more"><span>Recette</span><svg aria-hidden="true"><use href="#chev"/></svg></span>
+      </summary>
+      <div class="r-body"><button class="copy" type="button" data-copy="r-dollars">Copier</button>
+<pre id="r-dollars">pipelines:
+  dollars-en-euros:
+    - command:
+        - sh
+        - -c
+        - |
+          montant=$(tr -cd '0-9.,' | tr ',' '.')
+          curl -fsS "https://api.frankfurter.dev/v1/latest?amount=$montant&amp;base=USD&amp;symbols=EUR" \
+            | jq -r '.rates.EUR' \
+            | LC_ALL=C awk '{printf "%.2f €", $1}' | tr '.' ','
+
+rules:
+  - match: '(?i)^\s*(\$\s*\d+([.,]\d+)?|\d+([.,]\d+)?\s*(\$|USD|dollars?))\s*$'
+    pipeline: dollars-en-euros</pre></div>
+    </details>
+
+    <details class="recipe">
+      <summary>
+        <span class="r-name">Une heure d'un autre fuseau<small>Fuseaux nord-américains, UTC et GMT, ramenés à l'heure de Paris.</small></span>
+        <span class="r-pair"><code class="in">3pm PST</code><svg aria-hidden="true"><use href="#arrow"/></svg><code class="out">00:00 (heure de Paris)</code></span>
+        <span class="r-more"><span>Recette</span><svg aria-hidden="true"><use href="#chev"/></svg></span>
+      </summary>
+      <div class="r-body"><button class="copy" type="button" data-copy="r-heure">Copier</button>
+<pre id="r-heure">pipelines:
+  heure-de-paris:
+    - trim
+    - command:
+        - sh
+        - -c
+        - |
+          TZ=Europe/Paris date -d "$(cat)" '+%H:%M (heure de Paris)'
+
+rules:
+  - match: '(?i)^\s*\d{1,2}(:\d{2})?\s*(am|pm)?\s+(PST|PDT|MST|MDT|CST|CDT|EST|EDT|UTC|GMT)\s*$'
+    pipeline: heure-de-paris</pre></div>
+    </details>
+
+    <details class="recipe">
+      <summary>
+        <span class="r-name">Des miles, des pieds, des °F<small>Trois petites règles, une par unité. Ajoute les tiennes sur le même modèle.</small></span>
+        <span class="r-pair"><code class="in">26.2 miles</code><svg aria-hidden="true"><use href="#arrow"/></svg><code class="out">42,2 km</code></span>
+        <span class="r-more"><span>Recette</span><svg aria-hidden="true"><use href="#chev"/></svg></span>
+      </summary>
+      <div class="r-body"><button class="copy" type="button" data-copy="r-unites">Copier</button>
+<pre id="r-unites">pipelines:
+  miles-en-kilometres:      # 26.2 miles → 42,2 km
+    - command:
+        - sh
+        - -c
+        - |
+          tr ',' '.' | LC_ALL=C awk '{printf "%.1f km", $1 * 1.609344}' | tr '.' ','
+  pieds-en-metres:          # 5 ft 11 → 1,80 m
+    - command:
+        - sh
+        - -c
+        - |
+          tr -c '0-9\n' ' ' | LC_ALL=C awk '{printf "%.2f m", $1 * 0.3048 + $2 * 0.0254}' | tr '.' ','
+  fahrenheit-en-celsius:    # 72°F → 22 °C
+    - command:
+        - sh
+        - -c
+        - |
+          tr ',' '.' | LC_ALL=C awk '{printf "%.0f °C", ($1 - 32) * 5 / 9}'
+
+rules:
+  - match: '(?i)^\s*\d+([.,]\d+)?\s*(mi|miles?)\s*$'
+    pipeline: miles-en-kilometres
+  - match: '(?i)^\s*\d+\s*(ft|pieds?)(\s*\d+(\s*in)?)?\s*$'
+    pipeline: pieds-en-metres
+  - match: '^\s*-?\d+([.,]\d+)?\s*°\s*F\s*$'
+    pipeline: fahrenheit-en-celsius</pre></div>
+    </details>
+
+    <details class="recipe">
+      <summary>
+        <span class="r-name">Un lien bourré de pistage<small>Retire <code>utm_…</code>, <code>fbclid</code>, <code>gclid</code> et consorts. Les autres paramètres restent.</small></span>
+        <span class="r-pair"><code class="in">exemple.fr/article?utm_source=lettre&amp;fbclid=IwAR0x</code><svg aria-hidden="true"><use href="#arrow"/></svg><code class="out">exemple.fr/article</code></span>
+        <span class="r-more"><span>Recette</span><svg aria-hidden="true"><use href="#chev"/></svg></span>
+      </summary>
+      <div class="r-body"><button class="copy" type="button" data-copy="r-lien">Copier</button>
+<pre id="r-lien">pipelines:
+  lien-propre:
+    - trim
+    - command:
+        - sed
+        - -E
+        - 's/([?&amp;])(utm_[a-z_]+|fbclid|gclid|igshid|mc_eid)=[^&amp;#]*/\1/g; s/([?&amp;])&amp;+/\1/g; s/[?&amp;]+(#|$)/\1/'
+
+rules:
+  - match: '^\s*https?://\S+[?&amp;](utm_[a-z_]+|fbclid|gclid|igshid|mc_eid)=\S*\s*$'
+    pipeline: lien-propre</pre></div>
+    </details>
+
+    <details class="recipe">
+      <summary>
+        <span class="r-name">Une URL YouTube<small>Un exemple de service interrogé avec <code>curl</code> et <code>jq</code>. Passe par le réseau : l'URL copiée est envoyée à YouTube.</small></span>
+        <span class="r-pair"><code class="in">youtube.com/watch?v=dQw4w9WgXcQ</code><svg aria-hidden="true"><use href="#arrow"/></svg><code class="out">[Rick Astley - Never Gonna Give You Up](…) — [Rick Astley](…)</code></span>
+        <span class="r-more"><span>Recette</span><svg aria-hidden="true"><use href="#chev"/></svg></span>
+      </summary>
+      <div class="r-body"><button class="copy" type="button" data-copy="r-youtube">Copier</button>
+<pre id="r-youtube">pipelines:
+  youtube-markdown:
+    - trim
+    - command:
+        - sh
+        - -c
+        - |
+          url=$(cat)
+          curl -fsS --get --data-urlencode "url=$url" --data-urlencode "format=json" https://www.youtube.com/oembed \
+            | jq -r --arg url "$url" 'def md: gsub("(?&lt;c&gt;[\\[\\]\\\\])"; "\\\(.c)"); "[\(.title | md)](\($url)) — [\(.author_name | md)](\(.author_url))"'
+
+rules:
+  - match: '^https?://(www\.)?(youtube\.com/watch|youtu\.be/)'
+    pipeline: youtube-markdown</pre></div>
+    </details>
+
+    <p class="group">Pour le terminal</p>
+
+    <details class="recipe">
+      <summary>
+        <span class="r-name">Du JSON sur une ligne<small>Avec <code>jq</code>. Si ce n'est pas du JSON valide, tu colles l'original.</small></span>
+        <span class="r-pair"><code class="in">{"nom":"UltraClipboard","regles":3}</code><svg aria-hidden="true"><use href="#arrow"/></svg><code class="out">le même, indenté</code></span>
+        <span class="r-more"><span>Recette</span><svg aria-hidden="true"><use href="#chev"/></svg></span>
+      </summary>
+      <div class="r-body"><button class="copy" type="button" data-copy="r-json">Copier</button>
+<pre id="r-json">pipelines:
+  json-lisible:
+    - command: ["jq", "."]
+
+rules:
+  - match: '(?s)^\s*[{\[].*[}\]]\s*$'
+    pipeline: json-lisible</pre></div>
+    </details>
+
+    <details class="recipe">
+      <summary>
+        <span class="r-name">Un numéro de ticket<small>Remplace <code>PROJ</code> et l'adresse du tracker par les tiens.</small></span>
+        <span class="r-pair"><code class="in">PROJ-1234</code><svg aria-hidden="true"><use href="#arrow"/></svg><code class="out">[PROJ-1234](https://tracker.example.com/PROJ-1234)</code></span>
+        <span class="r-more"><span>Recette</span><svg aria-hidden="true"><use href="#chev"/></svg></span>
+      </summary>
+      <div class="r-body"><button class="copy" type="button" data-copy="r-ticket">Copier</button>
+<pre id="r-ticket">pipelines:
+  lien-de-ticket:
+    - trim
+    - command: ["sed", "s|.*|[&amp;](https://tracker.example.com/&amp;)|"]
+
+rules:
+  - match: '^\s*PROJ-\d+\s*$'
+    pipeline: lien-de-ticket</pre></div>
+    </details>
+
+    <details class="recipe">
+      <summary>
+        <span class="r-name">Une commande copiée d'une doc<small>Retire l'invite <code>$</code> en début de ligne, sur chaque ligne.</small></span>
+        <span class="r-pair"><code class="in">$ npm install</code><svg aria-hidden="true"><use href="#arrow"/></svg><code class="out">npm install</code></span>
+        <span class="r-more"><span>Recette</span><svg aria-hidden="true"><use href="#chev"/></svg></span>
+      </summary>
+      <div class="r-body"><button class="copy" type="button" data-copy="r-invite">Copier</button>
+<pre id="r-invite">pipelines:
+  sans-invite:
+    - command: ["sed", "-E", 's/^[[:space:]]*\$ +//']
+
+rules:
+  - match: '^\s*\$ +[A-Za-z./~]'
+    pipeline: sans-invite</pre></div>
+    </details>
+
+    <p class="note">Les neuf recettes tiennent dans <a href="recettes.yaml">un seul fichier de config</a>, rejoué contre le moteur à chaque passage des tests. Elles s'appuient sur des outils courants : <code>sh</code>, <code>sed</code>, <code>awk</code>, <code>date</code>, <code>bc</code>, <code>jq</code>, <code>curl</code>.</p>
+  </section>
+
+  <section id="config">
+    <p class="label">Configuration</p>
+    <h2>Un fichier YAML, relu à chaque enregistrement.</h2>
+    <p class="sub">Des pipelines nommés, des règles qui les déclenchent. Enregistre, c'est pris en compte. Si le fichier est invalide, l'ancienne config reste active et un message te dit pourquoi.</p>
+    <div class="split">
+      <div class="codebox">
+        <div class="file">~/.config/ultraclipboard/config.yaml</div>
+<pre class="code"><span class="k">config_version</span>: 1
+<span class="k">notifications</span>: all          <span class="c"># all | errors | off</span>
+
+<span class="k">pipelines</span>:
+  <span class="p">json-lisible</span>:
+    - <span class="k">command</span>: ["jq", "."]
+  <span class="p">mon-script</span>:
+    - trim
+    - <span class="k">command</span>: ["python3", "~/scripts/corrige.py"]
+      <span class="k">timeout</span>: 5            <span class="c"># secondes, 10 par défaut</span>
+
+<span class="k">rules</span>:                      <span class="c"># la première qui correspond gagne</span>
+  - <span class="k">match</span>: '(?s)^\s*[{\[].*[}\]]\s*$'
+    <span class="k">pipeline</span>: <span class="p">json-lisible</span>
+  - <span class="k">match</span>: '^Brouillon :'
+    <span class="k">pipeline</span>: <span class="p">mon-script</span></pre>
+      </div>
+      <dl class="tx">
+        <div class="main"><dt>command</dt><dd><strong>Le cœur de l'outil.</strong> N'importe quel programme : le texte copié arrive sur son entrée standard, ce qu'il écrit sur sa sortie devient le texte collé. Un script Python, <code>sed</code>, <code>jq</code>, un appel d'API : si ça tourne dans un terminal, ça fait une transformation. Lancé sans shell, avec un délai maximal.</dd></div>
+        <p class="also">Et quelques transformations intégrées</p>
+        <div class="row"><dt>trim</dt><dd>Retire les espaces en début et en fin.</dd></div>
+        <div class="row"><dt>upper / lower</dt><dd>Majuscules ou minuscules, Unicode compris.</dd></div>
+        <div class="row"><dt>youtube</dt><dd>Titre et chaîne d'une vidéo, sans passer par <code>curl</code>.</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section id="confiance">
+    <div class="trust">
+      <figure class="halo" aria-hidden="true">
+        <img src="assets/ascii-halo.webp" alt="" width="1500" height="1105" loading="lazy">
+      </figure>
+      <div>
+        <p class="label">Confiance</p>
+        <h2>Il lit tout ce que tu copies. Voici ce qu'il en fait.</h2>
+        <dl class="facts">
+          <div><dt>Ce qu'il voit</dt><dd>Chaque texte copié, le temps de le comparer à tes règles. Les images et les fichiers sont ignorés.</dd></div>
+          <div><dt>Ce qu'il garde</dt><dd>Les 50 dernières transformations, en mémoire, effacées à l'arrêt. <strong>Une copie qu'aucune règle ne reconnaît ne laisse aucune trace.</strong> Rien n'est écrit sur disque, rien dans le journal système.</dd></div>
+          <div><dt>Ce qui sort de ta machine</dt><dd>Rien, sauf ce que tes règles demandent. Une recette qui interroge un service, comme YouTube ou un taux de change, lui envoie le texte copié. Les autres ne touchent pas au réseau.</dd></div>
+          <div><dt>Ce que tu contrôles</dt><dd>La pause, depuis le menu de l'icône. Le retour à l'original, par un raccourci. Et si tu quittes l'appli, tes copies redeviennent des copies ordinaires.</dd></div>
+        </dl>
+      </div>
+    </div>
+
+    <div class="under">
+      <figure class="menu">
+        <ul aria-label="Menu de l'icône dans la barre du haut">
+          <li>Ouvrir</li>
+          <li class="hl">Mettre en pause</li>
+          <li>Couper les notifications</li>
+          <li class="sep" aria-hidden="true"></li>
+          <li>Quitter</li>
+        </ul>
+        <figcaption>Le menu de l'icône</figcaption>
+      </figure>
+      <div class="limits">
+        <h3>Ce qu'il ne fait pas</h3>
+        <ul>
+          <li><strong>Du texte seulement.</strong> Une image ou un fichier copié passe sans être touché.</li>
+          <li><strong>GNOME sous Wayland seulement,</strong> testé sur Ubuntu 26.04. Ni Windows, ni macOS.</li>
+          <li><strong>Il ne retarde pas ton collage.</strong> Coller avant la fin d'une transformation lente donne l'original.</li>
+          <li><strong>Une règle se déclenche sur le contenu,</strong> pas à la demande : on ne choisit pas une transformation au moment de coller.</li>
+          <li><strong>Pas de paquet tout prêt.</strong> L'installation compile l'appli sur ta machine.</li>
+          <li><strong>La config s'écrit à la main.</strong> La fenêtre de l'appli affiche les règles et l'historique, sans les modifier.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" class="install">
+    <p class="label">Installation</p>
+    <h2>Trois étapes, dont une déconnexion.</h2>
+    <ol>
+      <li>
+        <h3>Installe les prérequis</h3>
+        <div>
+          <p><a href="https://rustup.rs">Rust</a>, <a href="https://bun.sh">bun</a> et les paquets système de Tauri.</p>
+          <div class="cmd"><code id="cmdApt">sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libsoup-3.0-dev libayatana-appindicator3-dev librsvg2-dev</code><button class="copy" type="button" data-copy="cmdApt">Copier</button></div>
+        </div>
+      </li>
+      <li>
+        <h3>Clone et lance le script</h3>
+        <div>
+          <p>Il compile l'appli (compte quelques minutes), installe le service et active l'extension. Il n'installe aucun paquet système à ta place : s'il en manque un, il t'affiche la commande.</p>
+          <div class="cmd"><code id="cmdInstall">git clone https://github.com/Schrubitteflau/UltraClipboard &amp;&amp; cd UltraClipboard &amp;&amp; ./install.sh</code><button class="copy" type="button" data-copy="cmdInstall">Copier</button></div>
+        </div>
+      </li>
+      <li>
+        <h3>Déconnecte-toi, reconnecte-toi</h3>
+        <div>
+          <p>Sous Wayland, GNOME ne charge une nouvelle extension qu'à l'ouverture de session. Ensuite, le service démarre tout seul à chaque session. Ta config est créée au premier lancement, avec une règle d'exemple.</p>
+        </div>
+      </li>
+    </ol>
+    <p class="note">Pour la suite, le README détaille la <a href="https://github.com/Schrubitteflau/UltraClipboard#mise-à-jour">mise à jour</a> et la <a href="https://github.com/Schrubitteflau/UltraClipboard#désinstallation">désinstallation</a>.</p>
+  </section>
+
+  <footer>
+    <span>UltraClipboard · Licence MIT</span>
+    <span class="ramp" aria-hidden="true">.:-=+*#%@</span>
+    <span>Images : <a href="https://backgrounds.supply/">Backgrounds Supply</a> · <a href="https://github.com/Schrubitteflau/UltraClipboard">GitHub</a></span>
+  </footer>
+</div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const wait = ms => new Promise(res => setTimeout(res, ms));
+
+  // Collage : le texte arrive d'un bloc, à travers la rampe ASCII des images.
+  // Chaque caractère monte en densité ( . : = + * # % @ ) puis se fixe. Les
+  // espaces et les séparateurs restent en place, pour que les lignes ne
+  // bougent pas pendant l'effet.
+  const RAMP = ".:=+*#%@";
+  function materialize(node, text, dur, alive = () => true) {
+    const chars = [...text];
+    if (reduce) { node.textContent = text; return Promise.resolve(); }
+    const settle = chars.map(() => dur * (0.35 + 0.65 * Math.random()));
+    const t0 = performance.now();
+    return new Promise(res => {
+      (function frame(now) {
+        if (!alive()) return res();
+        const t = now - t0;
+        node.textContent = chars.map((c, i) =>
+          t >= settle[i] || /[\s\-\/?&]/.test(c) ? c : RAMP[Math.min(RAMP.length - 1, Math.floor(t / settle[i] * RAMP.length))]
+        ).join("");
+        if (t < dur) requestAnimationFrame(frame); else res();
+      })(t0);
+    });
+  }
+
+  // ---------- hero : ce que tiennent les deux mains ----------
+  const PAIRS = [
+    ["128 * 12 =", "1536"],
+    ["49 $", "43,70 €"],
+    ["3pm PST", "00:00 (heure de Paris)"],
+    ["youtube.com/watch?v=dQw4w9WgXcQ", "[Never Gonna Give You Up](…)"]
+  ];
+  const heldIn = $("heldIn"), heldOut = $("heldOut"), spark = $("spark");
+  async function hero() {
+    let i = 0;
+    await wait(2600);
+    while (true) {
+      heldIn.classList.remove("on"); heldOut.classList.remove("on");
+      await wait(420);
+      i = (i + 1) % PAIRS.length;
+      heldIn.textContent = PAIRS[i][0]; heldOut.textContent = "";
+      heldIn.classList.add("on");                 // copié
+      await wait(800);
+      spark.classList.add("flash");               // transformé
+      await wait(380);
+      heldOut.classList.add("on");                // collé
+      await materialize(heldOut, PAIRS[i][1], 420);
+      spark.classList.remove("flash");
+      await wait(2400);
+    }
+  }
+  if (!reduce) hero();
+
+  // ---------- démo ----------
+  const EXAMPLES = [
+    { tab: "Calcul", pipeline: "calcul", ms: 500,
+      srcTitle: "budget.txt — Éditeur de texte", src: "128 * 12 =",
+      dstTitle: "Nouveau message", pre: "Sur l'année, ça nous fait ", out: "1536" },
+    { tab: "Lien propre", pipeline: "lien-propre", ms: 500,
+      srcTitle: "Un article — Navigateur web", src: "https://exemple.fr/article?utm_source=lettre&utm_campaign=promo&fbclid=IwAR0x",
+      dstTitle: "Message à Camille", pre: "Regarde ça : ", out: "https://exemple.fr/article" },
+    { tab: "YouTube", pipeline: "youtube-markdown", ms: 1100,
+      srcTitle: "Never Gonna Give You Up — Navigateur web", src: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      dstTitle: "notes.md — Éditeur de texte", pre: "",
+      out: "[Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)](https://www.youtube.com/watch?v=dQw4w9WgXcQ) — [Rick Astley](https://www.youtube.com/@RickAstleyYT)" }
+  ];
+  const el = {
+    srcTitle: $("srcTitle"), srcText: $("srcText"), flow: $("flow"), chip: $("chip"), chipName: $("chipName"),
+    dstTitle: $("dstTitle"), dstPre: $("dstPre"), dstText: $("dstText"),
+    toast: $("toast"), toastTitle: $("toastTitle"), keys: $("keys"), keyLetter: $("keyLetter"),
+    steps: [$("step1"), $("step2"), $("step3")]
+  };
+
+  let token = 0, inView = true;
+  const sleep = (ms, t) => new Promise((res, rej) => setTimeout(() => t === token ? res() : rej("cancel"), ms));
+
+  const tabBtns = EXAMPLES.map((ex, i) => {
+    const b = document.createElement("button");
+    b.className = "tab"; b.type = "button"; b.textContent = ex.tab;
+    b.addEventListener("click", () => start(i));
+    $("tabs").appendChild(b);
+    return b;
+  });
+
+  const step = n => el.steps.forEach((s, j) => s.classList.toggle("on", j === n));
+
+  function reset(i) {
+    const ex = EXAMPLES[i];
+    tabBtns.forEach((b, j) => b.setAttribute("aria-pressed", String(i === j)));
+    el.srcTitle.textContent = ex.srcTitle;
+    el.srcText.textContent = ex.src;
+    el.srcText.classList.remove("on");
+    el.flow.classList.remove("on");
+    el.chip.classList.remove("run", "ok");
+    el.chipName.textContent = ex.pipeline;
+    el.dstTitle.textContent = ex.dstTitle;
+    el.dstPre.textContent = ex.pre;
+    el.toast.classList.remove("on");
+    el.toastTitle.textContent = "✓ " + ex.pipeline;
+    el.keys.classList.remove("on", "press");
+    el.dstText.textContent = "";
+  }
+
+  async function press(letter, t) {
+    el.keyLetter.textContent = letter;
+    el.keys.classList.add("on"); await sleep(380, t);
+    el.keys.classList.add("press"); await sleep(170, t);
+    el.keys.classList.remove("press"); await sleep(420, t);
+    el.keys.classList.remove("on");
+  }
+
+  async function play(i, t) {
+    const ex = EXAMPLES[i];
+    reset(i);
+    if (reduce) {
+      el.srcText.classList.add("on"); el.flow.classList.add("on"); el.chip.classList.add("ok");
+      el.dstText.textContent = ex.out;
+      return;
+    }
+    step(-1);
+    await sleep(600, t);
+    step(0);
+    el.srcText.classList.add("on");               // sélection
+    await sleep(800, t);
+    await press("C", t);                          // Ctrl+C
+    step(1);
+    el.flow.classList.add("on");                  // une règle reconnaît le texte
+    el.chip.classList.add("run");
+    await sleep(ex.ms, t);
+    el.chip.classList.replace("run", "ok");       // pipeline terminé
+    el.toast.classList.add("on");                 // notification
+    await sleep(1300, t);
+    step(2);
+    await press("V", t);                          // Ctrl+V
+    await materialize(el.dstText, ex.out, 450, () => t === token);
+    await sleep(900, t);
+    el.toast.classList.remove("on");
+    await sleep(2600, t);
+  }
+
+  async function start(i) {
+    const t = ++token;
+    try {
+      while (true) {
+        while (!inView) await sleep(400, t);
+        await play(i, t);
+        if (reduce) return;
+        i = (i + 1) % EXAMPLES.length;
+      }
+    } catch (e) { /* annulé par un clic sur un onglet */ }
+  }
+
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(es => { inView = es[0].isIntersecting; }).observe($("desk"));
+  }
+  start(0);
+
+  // ---------- boutons « Copier » ----------
+  document.querySelectorAll("[data-copy]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText($(btn.dataset.copy).textContent);
+        btn.textContent = "Copié ✓";
+      } catch (e) {
+        btn.textContent = "Échec";
+      }
+      setTimeout(() => { btn.textContent = "Copier"; }, 2000);
+    });
+  });
+})();
+</script>
+</body>
+</html>

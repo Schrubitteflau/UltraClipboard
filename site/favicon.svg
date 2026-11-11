@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-48 -48 96 96">
+  <rect x="-48" y="-48" width="96" height="96" rx="18" fill="#000"/>
+  <path d="M-32-8v-24h24" fill="none" stroke="#9aa2e8" stroke-width="8" stroke-linecap="square"/>
+  <path d="M32 8v24H8" fill="none" stroke="#edeae4" stroke-width="8" stroke-linecap="square"/>
+  <rect x="-9.5" y="-9.5" width="19" height="19" fill="#ec7a52" transform="rotate(45)"/>
+</svg>
