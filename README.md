@@ -297,9 +297,5 @@ restent sa propriété. Elles sont utilisées ici, recadrées et compressées, s
 les redistribuer, ni les proposer au téléchargement. Pour t'en servir ailleurs, obtiens-les auprès de
 Backgrounds Supply.
 
-**Les skills d'agents non plus.** Ceux de `.agents/skills/` viennent de
-[mattpocock/skills](https://github.com/mattpocock/skills), sous licence MIT de leur auteur :
-voir [.agents/skills/NOTICE.md](.agents/skills/NOTICE.md).
-
-**Ni les polices du site.** Celles de `site/fonts/` sont sous SIL Open Font License 1.1 :
+**Les polices du site non plus.** Celles de `site/fonts/` sont sous SIL Open Font License 1.1 :
 voir [site/fonts/LICENCE.md](site/fonts/LICENCE.md).
