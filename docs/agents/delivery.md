@@ -38,7 +38,7 @@ Read by `/ship` and its subagents.
 
 ## Docs
 
-- Spec: issue #1; tickets: its sub-issues. Decision journal: `~/.local/share/ship/ultraclipboard/decisions/ultraclipboard-v1.md`, outside the repo: every worktree reads and appends to that one file. Never copy it into the tree, never commit it. ADRs: `docs/adr/`. Glossary: `GLOSSARY.md`. No separate review-standards file: the spec's "Testing Decisions" are the standard.
+- Spec: issue #1; tickets: its sub-issues. Decision journals: `~/.local/share/ship/ultraclipboard/decisions/`, one file per spec (issue #1: `ultraclipboard-v1.md`), outside the repo: every worktree reads and appends to the same files. They stay out of the tree and out of git. ADRs: `docs/adr/`. Glossary: `GLOSSARY.md`. No separate review-standards file: the spec's "Testing Decisions" are the standard.
 
 ## Real usage
 
