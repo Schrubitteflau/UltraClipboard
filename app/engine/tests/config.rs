@@ -18,7 +18,7 @@ fn assert_refused(yaml: &str, field: &str, reason: &str) {
 }
 
 #[test]
-fn the_sample_config_is_valid_and_holds_the_youtube_rule() {
+fn the_sample_config_is_valid_and_holds_the_clean_link_rule() {
     let config = Config::parse(SAMPLE_CONFIG).unwrap();
     let rules: Vec<_> = config
         .rules()
@@ -28,8 +28,8 @@ fn the_sample_config_is_valid_and_holds_the_youtube_rule() {
     assert_eq!(
         rules,
         [(
-            r"^https?://(www\.)?(youtube\.com/watch|youtu\.be/)",
-            "youtube-markdown"
+            r"^\s*https?://\S+[?&](utm_[a-z_]+|fbclid|gclid|igshid|mc_eid)=\S*\s*$",
+            "lien-propre"
         )]
     );
 }
@@ -165,6 +165,20 @@ fn an_unknown_transformation_is_refused() {
 }
 
 #[test]
+fn the_former_youtube_transformation_is_refused_like_any_unknown_one() {
+    assert_refused(
+        "config_version: 1\npipelines:\n  p:\n    - youtube:\n        template: \"[{title}]({url})\"\n",
+        "pipelines.p[0]",
+        "Transformation inconnue « youtube »",
+    );
+    assert_refused(
+        "config_version: 1\npipelines:\n  p: [youtube]\n",
+        "pipelines.p[0]",
+        "Transformation inconnue « youtube »",
+    );
+}
+
+#[test]
 fn a_step_naming_two_transformations_is_refused() {
     assert_refused(
         "config_version: 1\npipelines:\n  p:\n    - trim:\n      upper:\n",
@@ -194,14 +208,14 @@ fn a_parameter_given_to_a_transformation_without_parameters_is_refused() {
 #[test]
 fn a_bad_parameter_is_refused_with_its_path() {
     assert_refused(
-        "config_version: 1\npipelines:\n  p:\n    - youtube: {template: [1]}\n",
-        "pipelines.p[0].youtube.template",
+        "config_version: 1\npipelines:\n  p:\n    - trim\n    - command: [sed, [1]]\n",
+        "pipelines.p[1].command[1]",
         "attendu un texte",
     );
     assert_refused(
-        "config_version: 1\npipelines:\n  p:\n    - youtube: {tempalte: x}\n",
-        "pipelines.p[0].youtube.tempalte",
-        "paramètre inconnu",
+        "config_version: 1\npipelines:\n  p:\n    - command: {program: sed}\n",
+        "pipelines.p[0].command",
+        "attendu une liste d'arguments",
     );
 }
 

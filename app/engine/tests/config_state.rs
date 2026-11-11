@@ -8,8 +8,7 @@ use engine::{Config, ConfigError, Engine, Refusal, RefusalKind, Step};
 const TWO_RULES: &str = r#"config_version: 1
 pipelines:
   yt:
-    - youtube:
-        template: "[{title}]({url})"
+    - command: ["jq", "-r", ".title"]
   clean:
     - trim
     - command: ["python3", "~/fix.py"]
@@ -37,7 +36,7 @@ fn the_state_lists_rules_in_file_order_and_every_pipeline_with_its_steps() {
             ],
             "pipelines": [
                 { "name": "yt", "steps": [
-                    { "transformation": "youtube", "params": r#"template: "[{title}]({url})""# },
+                    { "transformation": "command", "params": r#"["jq", "-r", ".title"]"# },
                 ]},
                 { "name": "clean", "steps": [
                     { "transformation": "trim", "params": "" },
@@ -133,19 +132,16 @@ fn step_parameters_are_shown_as_written() {
 
     // Émoji composé (ZWJ), sélecteur de variante, accents décomposés (NFD).
     let written = "👩‍💻 ❤️ e\u{301}te\u{301}";
-    let steps = steps_of(&format!(
-        "    - youtube:\n        template: \"{written}\"\n"
-    ));
-    assert_eq!(steps[0].params, format!("template: \"{written}\""));
+    let steps = steps_of(&format!("    - command: [\"echo\", \"{written}\"]\n"));
+    assert_eq!(steps[0].params, format!("[\"echo\", \"{written}\"]"));
 }
 
 #[test]
 fn control_and_bidi_characters_in_parameters_are_escaped() {
-    let steps =
-        steps_of("    - youtube:\n        template: \"a\\tb\\u202Ec\\u061Cd\\u2028e\\u2029f\"\n");
+    let steps = steps_of("    - command: [\"echo\", \"a\\tb\\u202Ec\\u061Cd\\u2028e\\u2029f\"]\n");
     assert_eq!(
         steps[0].params,
-        r#"template: "a\tb\u{202e}c\u{61c}d\u{2028}e\u{2029}f""#
+        r#"["echo", "a\tb\u{202e}c\u{61c}d\u{2028}e\u{2029}f"]"#
     );
 }
 

@@ -26,7 +26,7 @@ Read by `/ship` and its subagents.
 
 - Real data, never read or written: `~/.config/ultraclipboard/`, the human's clipboard, `~/.local/bin/ultraclipboard`, `~/.local/share/gnome-shell/extensions/`, `~/.config/systemd/user/`.
 - Real actions, never performed: running `install.sh`; `systemctl --user` on `ultraclipboard.service`; enabling/disabling GNOME extensions; registering the D-Bus name `org.ultraclipboard.UltraClipboard` on the real session bus; sending desktop notifications on the real session (tests use the private bus).
-- Paid services: none. The Internet is never called by tests: `youtube` is tested against a local fake oEmbed server.
+- Paid services: none. The Internet is never called by tests: no Transformation calls a service (a recipe that does, like YouTube oEmbed through `command` + `curl`, is the human's to try by hand).
 - Shared resources: the human's GNOME session and session bus.
 
 ## Branches and commits
@@ -42,7 +42,7 @@ Read by `/ship` and its subagents.
 
 ## Real usage
 
-One user, one GNOME session. Copies arrive one at a time, by hand, sometimes in quick bursts (a few per second). Copied text is usually short (a URL, a line, a paragraph) but can be large (a whole file, hundreds of KB) and any Unicode. A handful of Rules and Pipelines in the config. `command` runs the user's own scripts; `youtube` hits oEmbed once per matching copy.
+One user, one GNOME session. Copies arrive one at a time, by hand, sometimes in quick bursts (a few per second). Copied text is usually short (a URL, a line, a paragraph) but can be large (a whole file, hundreds of KB) and any Unicode. A handful of Rules and Pipelines in the config. `command` runs the user's own scripts, some of which call an online service (e.g. `curl` to YouTube oEmbed) once per matching copy.
 
 ## Project edge cases
 

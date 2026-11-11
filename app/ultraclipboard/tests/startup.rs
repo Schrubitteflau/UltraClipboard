@@ -35,7 +35,7 @@ async fn a_missing_config_is_created_from_the_sample_and_loaded() {
         .collect();
     assert_eq!(files, ["config.yaml"], "fichier temporaire laissé derrière");
     let pipelines: Vec<_> = config.rules().iter().map(|r| r.pipeline()).collect();
-    assert_eq!(pipelines, ["youtube-markdown"]);
+    assert_eq!(pipelines, ["lien-propre"]);
     assert_eq!(engine.config_error(), None);
 }
 

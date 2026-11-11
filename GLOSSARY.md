@@ -5,7 +5,7 @@ Petit outil d'arrière-plan qui transforme le contenu textuel du presse-papier s
 ## Language
 
 **Transformation**:
-Une opération qui prend un texte et rend un texte (ex. `trim`, `youtube-markdown`).
+Une opération qui prend un texte et rend un texte (ex. `trim`, `upper`).
 _Avoid_: Module, plugin, transformer
 
 **Pipeline**:
