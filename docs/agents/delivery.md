@@ -31,14 +31,14 @@ Read by `/ship` and its subagents.
 
 ## Branches and commits
 
-- Integration branch `ship/v1` from `master`; ticket branches `ship/v1-<ticket>` (e.g. `ship/v1-2`). Worktrees live in `../UltraClipboard-ship/`.
-- Running `/ship` is the human's request to commit on those branches, never on `master`.
+- Worktrees live in `../UltraClipboard-ship/`.
+- Running `/ship` is the human's request to commit on its `ship/<n>` branches, never on `master`.
 - Commit messages: French, imperative, short subject ending with the ticket, e.g. `Moteur asynchrone et service D-Bus sans fenêtre (#2)`; body if useful.
-- At the end: push `ship/v1`, open a PR to `master`; the human merges after checking the app by hand.
+- At the end: push the integration branch, open a PR to `master`; the human merges after checking the app by hand.
 
 ## Docs
 
-- Spec: issue #1; tickets: its sub-issues. ADRs: `docs/adr/`. Glossary: `GLOSSARY.md`. No separate review-standards file: the spec's "Testing Decisions" are the standard.
+- ADRs: `docs/adr/`. Glossary: `GLOSSARY.md`. No separate review-standards file: the spec's "Testing Decisions" are the standard.
 
 ## Real usage
 
