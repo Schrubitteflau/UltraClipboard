@@ -285,3 +285,14 @@ Pas tout à fait ce que tu cherches ? Voici une liste non exhaustive d'outils pr
 - **[Ditto](https://sabrogden.github.io/Ditto/)** ([source](https://github.com/sabrogden/Ditto)) : gestionnaire de presse-papier. Windows.
 - **[ClipboardFusion](https://www.clipboardfusion.com/)** : presse-papier avec macros. Windows, macOS.
 - **[CopyQ](https://hluk.github.io/CopyQ/)** ([source](https://github.com/hluk/CopyQ)) : gestionnaire de presse-papier scriptable. Linux, Windows, macOS.
+
+## Licence
+
+Le code d'UltraClipboard est distribué sous [licence MIT](LICENSE).
+
+**Les images du site ne sont pas couvertes par cette licence.** Celles de `site/assets/`, et
+`site/og.png` qui en reprend une, viennent de [Backgrounds Supply](https://backgrounds.supply/) et
+restent sa propriété. Elles sont utilisées ici, recadrées et compressées, selon son
+[contrat de licence](https://backgrounds.supply/license-agreement) : tu ne peux ni les réutiliser, ni
+les redistribuer, ni les proposer au téléchargement. Pour t'en servir ailleurs, obtiens-les auprès de
+Backgrounds Supply.

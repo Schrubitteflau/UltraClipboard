@@ -1,0 +1,126 @@
+# Recettes d'UltraClipboard : des Règles et leurs Pipelines, prêts à copier
+# dans ~/.config/ultraclipboard/config.yaml.
+#
+# Ce fichier est une config complète et valide. Prends tout, ou seulement les
+# recettes qui te servent : pour chacune, un Pipeline et la Règle qui l'appelle.
+# L'ordre des Règles compte : la première qui reconnaît le texte gagne.
+#
+# Tout passe par `command` : aucune recette ne dépend d'une Transformation
+# propre à un service. Outils utilisés : sh, sed, awk, tr, date, bc, jq, curl.
+# Deux recettes passent par le réseau : `youtube-markdown` (l'URL copiée est
+# envoyée à YouTube) et `dollars-en-euros` (seul le montant est envoyé à
+# frankfurter.dev).
+
+config_version: 1
+notifications: all
+
+pipelines:
+  # https://www.youtube.com/watch?v=…  →  [Titre](URL) — [Chaîne](URL)
+  # Titre et chaîne demandés au service oEmbed de YouTube ; les crochets du
+  # titre sont échappés pour Markdown.
+  youtube-markdown:
+    - trim
+    - command:
+        - sh
+        - -c
+        - |
+          url=$(cat)
+          curl -fsS --get --data-urlencode "url=$url" --data-urlencode "format=json" https://www.youtube.com/oembed \
+            | jq -r --arg url "$url" 'def md: gsub("(?<c>[\\[\\]\\\\])"; "\\\(.c)"); "[\(.title | md)](\($url)) — [\(.author_name | md)](\(.author_url))"'
+
+  # https://exemple.fr/article?utm_source=lettre&fbclid=…  →  https://exemple.fr/article
+  lien-propre:
+    - trim
+    - command:
+        - sed
+        - -E
+        - 's/([?&])(utm_[a-z_]+|fbclid|gclid|igshid|mc_eid)=[^&#]*/\1/g; s/([?&])&+/\1/g; s/[?&]+(#|$)/\1/'
+
+  # 128 * 12 =  →  1536
+  calcul:
+    - command:
+        - sh
+        - -c
+        - |
+          { echo 'scale=2'; tr -d '= ' | tr ',' '.'; echo; } | bc | tr '.' ','
+
+  # 3pm PST  →  00:00 (heure de Paris)
+  heure-de-paris:
+    - trim
+    - command:
+        - sh
+        - -c
+        - |
+          TZ=Europe/Paris date -d "$(cat)" '+%H:%M (heure de Paris)'
+
+  # 49 $  →  43,70 €
+  dollars-en-euros:
+    - command:
+        - sh
+        - -c
+        - |
+          montant=$(tr -cd '0-9.,' | tr ',' '.')
+          curl -fsS "https://api.frankfurter.dev/v1/latest?amount=$montant&base=USD&symbols=EUR" \
+            | jq -r '.rates.EUR' \
+            | LC_ALL=C awk '{printf "%.2f €", $1}' | tr '.' ','
+
+  # 26.2 miles  →  42,2 km
+  miles-en-kilometres:
+    - command:
+        - sh
+        - -c
+        - |
+          tr ',' '.' | LC_ALL=C awk '{printf "%.1f km", $1 * 1.609344}' | tr '.' ','
+
+  # 5 ft 11  →  1,80 m
+  pieds-en-metres:
+    - command:
+        - sh
+        - -c
+        - |
+          tr -c '0-9\n' ' ' | LC_ALL=C awk '{printf "%.2f m", $1 * 0.3048 + $2 * 0.0254}' | tr '.' ','
+
+  # 72°F  →  22 °C
+  fahrenheit-en-celsius:
+    - command:
+        - sh
+        - -c
+        - |
+          tr ',' '.' | LC_ALL=C awk '{printf "%.0f °C", ($1 - 32) * 5 / 9}'
+
+  # {"a":1,"b":[2,3]}  →  le même JSON, indenté
+  json-lisible:
+    - command: ["jq", "."]
+
+  # PROJ-1234  →  [PROJ-1234](https://tracker.example.com/PROJ-1234)
+  lien-de-ticket:
+    - trim
+    - command: ["sed", "s|.*|[&](https://tracker.example.com/&)|"]
+
+  # $ npm install  →  npm install
+  sans-invite:
+    - command: ["sed", "-E", 's/^[[:space:]]*\$ +//']
+
+rules:
+  - match: '^https?://(www\.)?(youtube\.com/watch|youtu\.be/)'
+    pipeline: youtube-markdown
+  - match: '^\s*https?://\S+[?&](utm_[a-z_]+|fbclid|gclid|igshid|mc_eid)=\S*\s*$'
+    pipeline: lien-propre
+  - match: '^\s*[\d\s.,()+*/-]*\d[\d\s.,()]*[+*/-][\d\s.,()+*/-]*\d[\s)]*=\s*$'
+    pipeline: calcul
+  - match: '(?i)^\s*\d{1,2}(:\d{2})?\s*(am|pm)?\s+(PST|PDT|MST|MDT|CST|CDT|EST|EDT|UTC|GMT)\s*$'
+    pipeline: heure-de-paris
+  - match: '(?i)^\s*(\$\s*\d+([.,]\d+)?|\d+([.,]\d+)?\s*(\$|USD|dollars?))\s*$'
+    pipeline: dollars-en-euros
+  - match: '(?i)^\s*\d+([.,]\d+)?\s*(mi|miles?)\s*$'
+    pipeline: miles-en-kilometres
+  - match: '(?i)^\s*\d+\s*(ft|pieds?)(\s*\d+(\s*in)?)?\s*$'
+    pipeline: pieds-en-metres
+  - match: '^\s*-?\d+([.,]\d+)?\s*°\s*F\s*$'
+    pipeline: fahrenheit-en-celsius
+  - match: '(?s)^\s*[{\[].*[}\]]\s*$'
+    pipeline: json-lisible
+  - match: '^\s*PROJ-\d+\s*$'
+    pipeline: lien-de-ticket
+  - match: '^\s*\$ +[A-Za-z./~]'
+    pipeline: sans-invite
